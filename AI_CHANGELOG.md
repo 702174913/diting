@@ -1,0 +1,94 @@
+- [2026-09-24 11:52:37] docs(谛听): 补充开发文档与分步开发验收计划
+- [2026-09-24 12:11:40] feat(谛听-S01): 数据基础增量迁移落地，含 14 张新表与回滚脚本
+- [2026-09-24 12:40:55] feat(谛听-S02): 后台真实登录与双身份域鉴权，白名单收紧、权限矩阵落地
+- [2026-09-24 12:48:24] feat(谛听-S03): 策略配置版本化与每日额度原子预占（防超卖/重复扣费）
+- [2026-09-24 13:00:02] feat(谛听-S04): 上传改为预签名原始字节 PUT，会话归属与格式/大小校验落地
+- [2026-09-24 13:08:52] feat(谛听-S05): 听悟契约修正与严格转写解析、可信结果下载
+- [2026-09-24 13:18:04] feat(谛听-S06): 状态机与租约作业管线，含状态迁移与墓碑保护
+- [2026-09-24 13:23:53] feat(谛听-S07): 规则库版本化 CRUD 与纯函数判读引擎
+- [2026-09-24 13:32:08] feat(谛听-S08): 角色确认与版本化报告，前端按区间高亮并去除无来源指标
+- [2026-09-24 13:40:30] feat(谛听-S09): 小程序闭环与服务端分页/墓碑删除，抽取可单测的轮询与分页逻辑
+- [2026-09-24 13:51:42] feat(谛听-S10): 后台录音资产/规则库/策略设置三页与审计留痕
+- [2026-09-24 14:04:22] feat(谛听-S11): PDF/ZIP 异步导出，固定模板与字体嵌入，产物复用与墓碑复查
+- [2026-09-24 14:30:27] feat(谛听-S12): 真实统计聚合接口与指标口径元数据，卡片标注真实/演示/待采集
+- [2026-09-24 15:41:06] feat(谛听-S13): 30天保留期与清理执行器，删除传播、租约恢复与账号匿名化
+- [2026-09-24 15:46:41] docs(谛听-S14): 核对阿里云官方契约并修正源语言/结果URL/业务键三处适配
+- [2026-09-24 16:34:08] fix(谛听-S15): 多agent审核后修复导出越权、任务卡完成、小程序导出与进度页阻断
+- [2026-09-24 17:24:36] fix(谛听-S16): PDF命中处标红并去掉版面标记外泄，页脚改为指定免责声明
+- [2026-09-24 17:31:49] feat(谛听-S16): 图片上传与OCR设计落地，新增V4迁移（媒体类型+资产表）与OCR契约核对
+- [2026-09-24 17:37:32] feat(谛听-S16): 上传支持图片类型，提交支持多文件并落资产表（含媒体类型/嗅探/资产mapper）
+- [2026-09-25 00:24:23] feat(谛听-S16): OCR端口与解析、管线图片分支、资产回显与导出（ZIP/PDF图片清单）
+- [2026-09-25 00:24:23] feat(谛听-S16): 小程序多选图片≤6与记录页图片区、后台录音详情图片清单
+- [2026-09-25 01:00:17] fix(谛听-H5): 修复上传页生命周期导入并支持浏览器选择录音和图片
+- [2026-09-25 01:11:48] feat(谛听-S17): 后台演示页接真实统计（新增 violations 分组与序列/明细），新增运营队列接口，删除无数据源的假指标与死按钮
+- [2026-09-25 01:13:38] feat(谛听-H5): 补账号登录注册弹层，记录拉取与上传登录后续接
+- [2026-09-25 01:24:56] fix(谛听-H5): 未登录直接跳独立登录页，登录后回原页面
+- [2026-09-25 02:03:00] chore(谛听-工具链): 项目内接入 jev-browser 技能（Jev 决策层浏览器自动化），endpoint 指向 Command Code Provider API 的 typesafe/jev，backend 固定 chrome
+- [2026-09-25 02:19:39] refactor(谛听-S18): Admin 全量重构——样式统一到 Tailwind v4 + shadcn-vue（源码 <style> 块归零）、组件抽离、查看/添加全弹窗并同步查询串、补齐录音导出/账号管理/规则版本历史与批量导入（后端 4 接口 + 迁移 V5，测试 243 全绿）
+
+## 2026-09-25 · 谛听 S18 收尾：演示样本 + 界面中文化
+
+- 造数：`diting-server/src/main/resources/sql/seed/`（生成器 + 915 行 SQL + 回滚脚本），
+  14 条催收合规演示规则、37 个任务、277 句、41 条违规证据，形态对齐听悟与阿里云 OCR 的真实返回；
+  风险分与证据自洽（8 项断言全 0）。样本会被后续指标算作 REAL，这是合成数据，使用者需知。
+- 迁移：补执行 V4（图片/OCR）与 V5（账号软删除），此前从未执行；执行前已备份。
+- 界面：内部枚举码全部中文化（新增 `src/lib/enums.ts`），录音详情时间轴改秒、违规句红标，
+  统计页明细表统一到 DataTable 规范；后端统计分组改为下发中文行名（不再输出枚举码）。
+- [2026-09-25 10:22:31] fix(谛听-导出): 后台导出三路由收紧到仅ADMIN，ADMIN导出看原文
+- [2026-09-25 10:22:31] chore(谛听-演示数据): 删除S18种子SQL与生成器，统计不再混入演示样本
+- [2026-09-25 10:28:00] chore(谛听-演示数据): 库内seed行已清零（备份见.diting-backup），保留3任务2用户真实数据
+
+- 发现待决：没有任何代码写 DENIED 审计行（`RESULT_DENIED` 定义但未使用），
+  真实运行时「权限拦截次数」恒为 0（样本里的 DENIED 行是造出来的）。
+
+- [2026-09-26 22:48:00] docs(谛听-审核): 三端并行只读代码质量审核，P0 2条/P1 20条/P2 23条；历史 R01-R24 复核 15 项未关闭，报告见 docs/quality-review-2026-09-26.md
+- [2026-09-27 11:46:09] feat(谛听-规则库): 新增规则库导入文件 docs/rules/diting-rules-dj-31.csv（31 条催收合规规则 / 10 分组）与说明 README；用生产 RuleImportService.precheck 验证 31 行全部可行（0 报错），用生产 RuleMatchService 对仓库三份样例判读：合规样本 20 分（<60 阈值）、含风险话术样本 95 分（三处埋点全命中）
+- [2026-09-27 12:19:32] feat(谛听-测试样例): 三份催收样例改用**真实男女双音色**重生（催收员 Tingting 女声中位 239-250Hz / 客户 Eddy 男声 102-110Hz，两簇P5-P95 不重叠），替掉原来「同一人降调 3 个半音」的假第二人声，声学说话人聚类才有真东西可聚；新增 scripts/make-cuishou-samples.sh（音色可换、--audition 音色试听）；转录文本一字未动，规则命中回归仍为 20/20/95
+- [2026-09-27 12:12:48] fix(谛听-Admin): 规则批量导入弹窗限高 85vh + 正文独立滚动 + 页脚固定，修「预检结果过长导致提交按钮被顶出视口点不到」；导入全部成功时 toast 并自动关弹窗（有失败行则留在弹窗内看明细），清除动作改到开窗时执行以免关窗动画期间结果先变空
+- [2026-09-27 12:43:53] refactor(谛听-术语): 后台账号相关「口令」统一改称「密码」——Admin 新建/重置账号弹窗、登录提示、服务端 PasswordPolicy/AdminAccountInitializer 文案与注释、DTO 校验 message、迁移脚本注释、测试用例与三端文档共 62 个文件同改；C 端登录页原本已叫「密码」，术语就此对齐。未动构建产物（target/dist）、`.diting-backup` 库备份、`docs/evidence` 历史运行日志，以及 `docs/rules/diting-rules-dj-31.csv` 里的「动态口令」（OTP 业务口径，非账户密码）
+- [2026-09-27 13:05:12] refactor(谛听-规则库): 目标角色功能暂时隐藏——**角色未确认时**判读不再区分说话人（`ignoreRoles = ROLE_TARGETING_HIDDEN && !rolesConfirmed`；角色已确认时角色限定照旧生效，故角色语义用例一个没删），Admin 规则编辑器去掉目标角色/触发角色字段（固定下发 ANY，窗口改称「应答窗口」）、规则列表与版本历史隐藏角色列、批量导入模板保留列但示例改 ANY；开关为服务端 `RuleMatchService.ROLE_TARGETING_HIDDEN` 与后台 `lib/features.ts::ROLE_TARGETING_ENABLED`，两处一起改回即可恢复原判读口径。起因：角色确认链路没有 HTTP 入口（`ReportService.saveMapping` 无路由），原口径下 31 条规则里 26 条 role_scope=AGENT 的规则静默失效——任务 1046 实测 riskScore=0 却发布为「合规」，确认角色后本应 95 分。**未改任何规则数据**（26 条 AGENT/4 条 CUSTOMER 触发角色原样保留，便于后期重新启用）；require 规则现在允许 `triggerRole=ANY`
+- [2026-09-27 13:05:21] feat(谛听-重判): 新增后台「重新判读」`POST /api/admin/recordings/{id}/reanalyze`（仅 ADMIN，审计 REPORT_REANALYZE）——按当前启用规则集重算并**追加**新报告版本，旧版本与旧证据保留；`ReportAnalysisService.publish` 的未确认角色分支放开 `COMPLETED`（状态机本来就允许 COMPLETED→ANALYZING，门禁是唯一限制），后台录音详情加「重新判读」按钮。同时按确认的方案把当前启用 31 条规则的 `role_scope` 统一改为 `ANY`（26 行；备份+逐行回滚脚本见 `.diting-backup/rule-role-scope-before-hide-20260927-130403.sql`，`trigger_role` 未动以保留触发方语义）；单测 43 项全绿（新增 AdminRecordingReanalyzeTest 3 项、ReportAnalysisServiceTest +2）
+- [2026-09-27 13:06:02] refactor(谛听-小程序): 上传成功给提示并跳到记录页 + 进度页并入记录页。`pages/upload` 提交成功后 `uploadToast('上传成功')` → 900ms 后 `navigateTo /pages/report/detail?id=<taskId>`，本页删掉内联进度卡、任务轮询与 `onShow/onHide` 生命周期（只负责「交出去」）；`pages/report/detail` 接管处理中状态——用 `createPolling` + `fetchTaskStatus` 每 3s 查状态、终态补一次正式报告（`loadReport(id, keepVisible=true)` 不闪加载态）、失败给「重新上传」、进来先过 `ensureLogin` 且保留「隐藏后异步续体不得启动定时器」守卫（原 P2-21）、标题按态切「正在聆听/质检记录」；`pages/progress/index.vue` 降级为只 `redirectTo` 的重定向页（不发请求、不持状态，旧链接/旧分享不 404），首页与记录列表不再按状态分流；`utils/h5Auth` 的 progress 回跳直指 detail。测试 43→44：新增「上传成功后提示并跳转」「记录页处理中只给进度，完成后自动拉正式报告并停轮询」，原进度页用例改写为记录页用例，harness 补 `setTimeout`/`navigateTo`/`setNavigationBarTitle` 与延时任务推进。验证：`node --test tests/*.test.cjs` 44 项全绿；改动文件 eslint 0 error；`docs/开发文档.md` 页面规格表同步
+- [2026-09-27 13:07:41] verify(谛听-重判): 任务 1046 服务层重判落地——报告 v2（report_versions id 1044，rule_set 33）riskScore **95**/compliance 5/PUBLISHED，旧版本 v1(id 1043, 0 分) 保留可回读；9 条证据：规则 1017《联系无关第三人或透露欠款信息》(句 1311, 扣20) + 规则 1048《威胁性后果或强制时限表述》(句 1307/1309/1313/1315, 一通电话只计一次共扣25) + 4 条 must-have 缺失(未表明机构15/未告知录音10/未告知还款方式15/未询问还款能力10)。重判走 `ReportService.analyzeWithoutRoles`（与后台 POST /reanalyze 同一条服务路径），一次性验证类 `src/test/java/com/diting/service/report/ReanalyzeLiveTest.java` 默认 @Disabled
+- [2026-09-27 13:47:43] feat(谛听-App): 记录页把「问题 / 对话」拆成两个 Tab（问题=通话级缺失项+命中句，对话=完整原文，共用同一份句子不重新拉取；未发布不出 Tab），命中处只显示规则名——规则库的匹配词/应答词改由新增 `utils/reportNotes.ts` 在展示层收口，历史报告落库的说明文案同样生效（Tabs 默认停「问题」，两个 Tab 都带条数）
+- [2026-09-27 13:24:05] feat(谛听-后台导出): 导出任务完成后**自动下载**——点击导出即提示「已加入下载任务（PDF/含原件 ZIP），生成完成后会自动下载」，作业跃迁到 COMPLETED 时前端自动另存（临时 `<a>` 点击，不用会被弹窗拦截的 `window.open`），并在「导出任务」里加了「完成后自动下载」开关（默认开）；刷新页面/多标签页都不丢（localStorage 记录已下载标记 + Web Locks 跨标签页互斥），AdminLayout 挂载时恢复轮询。服务端补上**另存为处置头**：`ObjectStorage.presignGet(key, ttl, downloadName)` 默认实现透传、OSS 实现下发 `response-content-disposition=attachment; filename="DT-年份-任务号-v版本.pdf"`（处置头是签名参数，不能事后拼 URL），文件名口径与开发文档 §9 一致；否则 PDF 会被浏览器内联打开、自动下载形同虚设。新增 ExportDownloadDispositionTest 4 项（PDF/ZIP 文件名、过期拒绝、未完成拒绝）
+- [2026-09-27 13:53:12] feat(谛听-小程序上传): 录音与图片改为二选一（不再允许混合提交）——`UploadSelection` 顶部加「录音 / 图片」tab（选中态高亮，主按钮随 tab 切成「选择录音文件 / 选择图片」），`mode` 类型 `UploadMode` 收口在 `src/utils/choose.ts`（props 写成字面量联合以便运行时 `type: String`，emit/数组用别名）；切 tab = 换这次交的东西：父页 `switchMode` 释放并清空已选的另一种、作废未确认的提交凭证、给明确提示（「已切到图片，之前选的录音已移除」），提交结果未确认时（`canChangeFiles`）不允许换 tab；`chooseFile` 只留 `[file]`、`chooseImageFiles` 只留图片，`pendingSummary` 按 mode 输出单项摘要；文案同步（「一次交一种，录音或图片都行」「两种只能选一种，换一种会把已选的移除」，up-p/up-caption 原「一次可以传多段」「可以一起交」删除）。**服务端未改**：`RecognitionTaskService` 仍支持混合（`MediaKind.derive` 出 MIXED），如要服务端也硬拦需另开一刀。测试 52→53：新增「录音与图片二选一：切 tab 释放另一种并明确提示」（含未确认提交时禁止换 tab）与组件/页面契约（tab、互斥按钮、两条选择路径只排一种）；验证 `node --test tests/*.test.cjs` 53 项全绿 + H5/微信小程序编译通过（`npx uni build -p h5|mp-weixin`）
+- [2026-09-27 14:30:00] refactor(谛听-统计收敛): 后台统计面收敛为**总览看板一个**——删除增长与留存/财务与单位经济/质检运营/违规图谱/质量与准确率/合规风控六个统计页（含路由、侧栏入口、`IR_LOCKED` 里的 `ops`/`map`、投资人横幅文案、`api/stats.ts` 的 `QueueItem`+`fetchOpsQueue`），后端删 `StatsService` 六个分组与其专属 helper（705→270 行）、`StatsMapper` 28 个方法含本就无人调用的 `exportByStatus`（314→108 行）、`GET /api/admin/ops/queue` 与其 `QueueItem`/`mask()`/`elapsedSeconds()`、`AdminController` 的废弃占位端点 `/growth` 与 `/finance`（`/dashboard` 保留，它是 `AdminEndpointSecurityTest` 的权限探针，A/B 验证过）；`queueByStatus` 因总览「当前队列」在用而**保留**（首轮脚本曾误判为 ops 专属，靠逐行号调用点反查纠正）。行为契约：`/api/admin/stats/{growth|finance|ops|violations|quality|compliance}` 与 `/api/admin/ops/queue` 一律 404，旧页面 URL 走路由兜底回总览；随之消失的聚合有风险占比、命中句数、违规分组、删除履约、权限拦截、额度/资产、时段分布、用户分层/留存、规则版本时效。`MetricsPanel` 的两张指标键集裁到总览真会出现的键（`DIRECTION_NEUTRAL` 收敛为空集，判断逻辑不动）。测试同步：`StatsServiceTest` 删分组用例、两个 sections 列表收窄为 overview、新增「已下线 7 个分组全部 404」；`AdminOpsControllerTest` 删队列三项；python SQL 切片删 `riskyReports`；e2e 脚本改写为总览口径 + 下线面 404 契约（39 项断言，需 MySQL，本轮未执行）。验证：`diting-admin` `npm test` 12/12 + `npm run build` 通过；服务端 `mvn -o test` **365 项 0 failures/0 errors**（直跑时那 18 项 error 是本机导出的 `DITING_JWT_SECRET` 只有 15 字节（120 bit）被 jjwt 拒绝，`env -u DITING_JWT_SECRET` 重跑全绿，与本次改动无关）；`python3 -m unittest tests.stats_first_publication_sql_test` 2/2；残留扫描 0 命中。改动前的文件原件备份在 `.diting-backup/pre-stats-removal-20260927-135235/`（带 `.bak` 后缀避免被语言工具链扫描）。记录见 `docs/统计面收敛记录-20260927.md`
+- [2026-09-27 14:03:06] feat(谛听-Admin录音详情): 后台录音资产详情「原件与导出」页签新增**原件在线试听**——`<audio controls preload="metadata">` 直接用服务端 15 分钟短链播放（对象 PUT 时已按格式写 Content-Type，OSS 返回 audio/*，媒体元素不需要 CORS），进「原件」页签对 ADMIN 自动静默签发一次（`watch(activeTab)` → `leaseAudio(true)`，不再要求先点按钮；`!silent` 才弹成功提示），播放器 `@error` 给「链接已失效/录音读不出来 → 重新签发原件」的兜底文案，签发按钮在有链接后改叫「重新签发原件」；非 ADMIN 与已过保留期的文案分开（不给「点一下就能听」的错觉）。测试 12→14
+- [2026-09-27 14:03:06] fix(谛听-Admin反馈): 后台导出/重新判读由「点了只置灰」改成**点击即有 toast**——`toast.loading(...)` 先给进行中提示，再用同一 id 换成成功/失败提示（不叠第二条）；`exporting` 从 boolean 改为 `'pdf' | 'zip' | null`（`exportBusy` 供置灰），进行中只把对应那一个按钮换成「正在提交…」而不是两个都变；`startExport` 补 `exportBusy` 入口守卫，防同一弹窗里两个导出按钮被连点出两个作业。说明：小程序的「保存这份记录 / 连同原件一起打包」当前仍是静默的（本页未动，待确认后另处理）
+- [2026-09-27 14:02:33] fix(谛听-C端导出): 修 H5 导出下载报 `Refused to get unsafe header "content-disposition"` —— uni-h5 的 `uni.downloadFile` 内部会读响应头取文件名，而 OSS 没通过 CORS 暴露该头，浏览器报错且文件名丢失（退化成 OSS 对象名）。H5 改为把预签名 URL 直接交给浏览器另存（隐藏 `<a>` 点击，服务端 `Content-Disposition` 决定名字），`openPdf`/`saveZip`（两个 `uni.downloadFile` 调用点）整块收进 `#ifndef H5`，小程序端行为不变；文件名口径抽到 `src/utils/exportArtifact.ts`（与后端 `ExportService.artifactFileName` 一致），小程序转发命名同步为 `DT-…-v2.zip`。新增 `tests/exportArtifact.test.cjs` 3 项（命名口径、H5 块不调 downloadFile、全文件不读响应头），C 端 56 项全绿；已核对 H5 编译产物里 `uni.downloadFile` 出现次数为 0
+- [2026-09-27 14:20:11] feat(谛听-C端导出): 导出下载加可见 loading——C 端报告页导出过程先给「正在生成…」（按钮禁用期间的状态提示），拿到下载地址后给「正在下载…」遮罩 loading（`uni.showLoading({ mask: true })`，H5 与小程序两个分支都开，成功/失败回调里关闭，不留遮罩锁死页面）；H5 主路径改为 `fetch` 拉字节流 → `URL.createObjectURL` 后同源另存（这样才有「下载中」这个可观测阶段，文件名也由前端确定，不再依赖跨域读不到的响应头），fetch 失败时兜底把地址交给浏览器（服务端已带 attachment 文件名）。C 端 57 项全绿（新增 2 项：loading 覆盖与 fetch+blob 主路径/兜底分支），已核对 H5 编译产物：`uni.downloadFile` 0 处、showLoading/hideLoading 与 fetch+blob 均在
+- [2026-09-27 14:11:43] fix(谛听-Admin导出): 修「点导出不下载了、也几乎没提示」。根因是**服务端产物复用 + 客户端「已下载过就不再自动下载」去重**打架：`ExportService.findReusable` 对同一 owner+报告版本+选项直接复用已完成的旧作业（审计里 ADMIN 多次 `EXPORT_CREATE` 的目标一直是 1023/1025，且 `export_jobs` 无新增行），而 `exportTask.autoDownload` 见到 `job.autoDownloaded`/`localStorage.markedDownloaded(id)` 就**静默 return**（那个标记本是防轮询/多标签页/刷新重复自动下载，却把用户的一次明确点击也挡掉了）。修法：新增 `force` —— `track()` 对「建完即完成态」的作业用 `autoDownload(tracked, { force: true, silent: true })` 强制签发下载，`force` 同时绕过内存与 localStorage 两道去重；`track()` 改为返回 `{ downloaded }`，页面据此区分「已开始下载」与「在『导出任务』里下载」（不再假装"生成完成后会自动下载"）；`autoDownload` 在非强制路径跳过时补一条「这份导出之前已经下载过（作业 #x）」而不是沉默；关掉自动下载的人仍会收到「产物已就绪、在『导出任务』里下载」。测试：仅管 16 项全绿（新增「复用产物时明确点击仍真的下载」「关掉自动下载也要有出处」两条）
+- [2026-09-27 14:19:10] fix(谛听-Admin提示): **后台所有 toast 都是隐形的**——`vue-sonner/style.css` 从未被导入（全仓 grep 无 import，style.css 里也没有任何 `[data-sonner-*]` 规则），Toaster 虽在 DOM 里且文案正确，但没有 `position: fixed`/`z-index`，只是 `#app` 末尾的普通流元素，被后台整屏布局（`min-h-[calc(100vh-60px)]` + 侧栏独立滚动）和弹窗的 `overflow: hidden` 挤到视口外，表现就是"点了没提示"。修法：`src/main.ts` 在 `./style.css` 之后补 `import 'vue-sonner/style.css'`；构建产物已验证含 `[data-sonner-toaster]{position:fixed;…;z-index:999999999}`。jsdom 实测对照：无样式时 getComputedStyle(toaster).position/zIndex 为空，有样式时为 fixed/999999999。新增契约测试「全局 toast 容器挂上了 vue-sonner 基础样式」（同时校验 main.ts 的 import、App.vue 的 `Toaster`、样式表确实带 fixed+高 z-index），测试 17 项全绿
+- [2026-09-27 14:25:00] fix(谛听-后台审计): 修「权限与审计」页筛选行塌成 0 宽——`form` 是 flex 行里的 auto 宽度项，而孩子 `FieldGroup` 自带 `w-full`，百分比子元素在不确定宽度的父级上解析成 0，筛选控件被挤到卡片右缘外并竖排（截图可见「动作/全部动作/查询」叠成一列、溢出卡片）。修法：标题块 `min-w-0`；`form` 改 `flex flex-1 flex-wrap items-end justify-end`（自己拿确定宽度）；`Field` 的固定宽度改写在包裹层 `<div class="w-56 shrink-0">` 上——**不能写 `Field class="w-56"`**：构建产物里 `.w-32 < .w-40 < .w-48 < .w-56 < .w-full`，Field 自带的 `w-full` 会把固定宽度盖掉（accounts/recordings/rules 三页的筛选宽度同样被盖成等分宽，本次未动，如需恢复各自 `w-*` 同样要加包裹层）；`SelectTrigger` 补 `w-full` 填满固定宽度，否则 `w-fit` 会把「全部动作」截断。验证：`npm test` 18/18（新增一条回归断言：form 的 flex-1、包裹层 w-56、Field 不再直接写宽度、trigger w-full、标题 min-w-0，且 SFC 模板可解析/编译）+ `npm run build` 通过 + 改动文件 eslint 0 error；另用真实 dev server 页面（经 `--init-script` 注入本地登录态并桩掉审计接口，避免 401 跳登录）量取渲染几何：form 566px、下拉 224px、按钮 88px 与 form 右侧对齐、卡片右缘 1254 而内容右缘 1233、横向溢出 0，截图确认单行呈现
+- [2026-09-27 14:28:50] fix(谛听-听悟回调): 按**官方真实契约**重写回调，修掉三处「回调等于没写」的问题。①**致命**：控制器读的是顶层 `TaskId`，而官方回调体是 `{"Code","Data":{"TaskId","TaskStatus","TaskKey","Result"}}`（TaskId 在 `Data` 下）→ 每条真实回调都静默 200、**从不唤醒任务**；改为读 `Data.TaskId`（顶层仅作 curl 调试兜底）。②`callback-path` 是死配置：官方机制是**回调地址在听悟管控台按项目配置**（HTTP post），CreateTask 只传 `Input.ProgressiveCallbacksEnabled=true`（代码已内置）→ 新增启动日志直接打印「管控台要填的地址」（`{DITING_PUBLIC_BASE_URL}{callback-path}[/{token}]`），配不到就 WARN。③**验签是我方自造**：官方 HTTP 回调文档没有签名头，原 `X-Tingwu-Signature` HMAC 会让真实回调全 401 → 删除 `callback-secret`/`DITING_TINGWU_CALLBACK_SECRET`，改为**路径共享令牌** `diting.aliyun.tingwu.callback-token`（env `DITING_TINGWU_CALLBACK_TOKEN`，配了就不再按 IP 限流，生产建议配）+ `callback-rate-per-minute`（默认 60，未配令牌时单 IP 限流；任务量大时要调大——这正是并发讨论里的隐患）。其余保持：`Data.Test` 连通性检查不查库直接 200、未知 TaskId/墓碑任务只记日志不唤醒、只唤醒不采信回调里的状态与结果、5 秒内返回。新增 `CallbackControllerTest` 9 项（官方 COMPLETED/ONGOING/FAILED 报文唤醒、连通性检查不碰库、未知任务与墓碑不唤醒、空体容错、路径令牌 401、未配令牌 60/min 后 429、启动日志）；文档：`开发文档.md` §5.2/§7.3 写入核对结论，S14 门禁行按实测契约修正。另按并发评审把小程序详情页轮询 3s → 5s（`diting-app/src/pages/report/detail.vue`）
+- [2026-09-27 14:28:55] docs(谛听-上线): 新增 docs/上线部署清单.md——12 项上线门禁、环境变量清单、三端构建、反代、冒烟、回滚（未执行任何构建/部署）
+- [2026-09-27 14:35:27] docs(谛听-上线): 上线部署清单开头加「一页速查」10 步，原详版降为附录
+- [2026-09-27 14:37:42] docs(谛听-上线): 上线清单改为「dump 直接导入」路线，标注 09:25 旧备份缺 V7–V11 不可当导入源
+
+- [2026-09-27 15:10:13] chore(谛听-上线): 生成当期生产库导出 diting.sql（22 表/台账 10 行/SHA256）并在临时库演练导入通过，临时库已清理
+- [2026-09-27 15:11:12] chore(谛听-构建): 重建后端 jar（JDK21 编译 release 17、跳过测试），已核验含 14:25 回调修复与当前配置
+
+- [2026-09-27 15:19:35] chore(谛听-上线): 改为不带数据的交付——新增纯表结构导出（22 表/0 行）并实测空库初始化路径（22 表+台账 10 行+协议 4 份），临时库已清理
+
+- [2026-09-27 15:25:01] chore(谛听-上线): 新增图形工具可导入的单文件建库脚本（22 表+台账/协议/配置/锁 18 行，无 DELIMITER/存储过程），实测导入通过，临时库已清理
+- [2026-09-27 16:11:30] docs(auth): 确认H5与后台登录均为API方式（/api/auth/login 与 /api/admin/login）
+
+- [2026-09-27 16:13:38] build(谛听-上线): 构建两端子路径产物并验证——admin 产物引用 /admin/assets/、H5 引用 /h5/assets/ 均正确；发现 H5 tabbar 图标被编译成根路径 /static/（不跟随 base）已在 nginx 加 alias 兜底，引用与文件对齐校验全通过
+
+- [2026-09-27 17:00:24] fix(谛听-上线): 实测纠正上轮误判——本地模拟子路径部署跑真实浏览器，admin/h5 共 31 个请求全 200 无白屏，tabbar 图标实际请求 /h5/static/（运行时按 __uniConfig.router.base 补前缀），故撤销多余的 nginx /static/ 兜底；另确认 dist/ 根目录那套是 13:48 旧产物（资源无 /h5），正式产物为 dist/build/h5
+
+- [2026-09-27 17:13:22] test(谛听-上线): H5 子路径部署全量实测——注入登录态跑首页，25 个请求全 200 零 404：tabbar 图标与所有分包/组件 chunk 均带 /h5 前缀，8 个即图标为 base64 内联不发请求，唯一不带 /h5 的是 /api/（设计如此）。产物引用无问题
+
+- [2026-09-27 17:21:35] fix(谛听-后端): 路径未匹配时返回 404 而非 500——NoResourceFoundException 原先落到 Exception 兜底，把「地址写错」误报成「服务器内部错误」；本轮线上 500 的真实根因正是 nginx 的 proxy_pass 尾斜杠吃掉了 /api 前缀（后端收到 /admin/login），nginx 侧需去掉该斜杠。此改动需下次打包生效，未在本机编译验证（无 Maven/JDK17）
+
+- [2026-09-27 17:29:44] feat(谛听-CORS): CORS 允许来源改为可配置——新增 diting.cors.allowed-origin-patterns / 环境变量 DITING_CORS_ORIGINS（默认仍为本机回环），解决反向代理未透传原始 Host 时同源请求被误判为跨域而返回 Invalid CORS request；另外 Windows env 模板补该变量。需重新打包 jar 生效，未在本机编译验证（无 Maven/JDK17）
+
+- [2026-09-27 17:32:35] chore(谛听-构建): 重新构建 H5 产物（引用带 /h5）并清理 dist/ 根目录的孤儿产物——那份 13:48 的旧构建是 base 改动前生成的、且输出到了 dist/ 根，正是「资源没带 h5」的误认来源；admin 登录跳转修复产物确认为含 /admin/login；后端 3 处改动（CORS 可配置/404 语义/yml）待重新打包，本机无 Maven 与 JDK17 无法代打
+
+- [2026-09-27 17:35:23] build(谛听-后端): 安装 JDK17+Maven 后成功重新打包 jar（17:34，50MB）——179 个源文件编译通过（补上此前「未编译验证」），并核对包内三处改动均已生效：application.yml 的 cors 配置、WebConfig 的三参构造器、GlobalExceptionHandler.notFound(NoResourceFoundException)。部署需替换 jar 并设 DITING_CORS_ORIGINS
+
+- [2026-09-27 17:44:27] fix(谛听-部署): 无后台账号根因是初始密码落弱密码表致建号失败，换合规值并补 SQL 建号备选
+
+- [2026-09-27 17:56:11] fix(谛听-部署): 补系统种子补丁 diting-seed-fix.sql——纯结构建库致协议接口 500、且 mutation_locks 缺 ADMIN_MEMBERSHIP 使建号被 409 拒
+- [2026-09-27 21:31:55] fix(谛听-OSS): 预签名切 V4 并自动推导 region，修新 Bucket 上传 403（V1 签名被禁）

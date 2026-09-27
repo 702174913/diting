@@ -1,0 +1,34 @@
+snapshot_at	mysql_version	db_name	db_collation	session_tz
+2026-09-24 12:05:51.746	9.3.0	diting	utf8mb4_unicode_ci	SYSTEM
+section
+--- SHOW CREATE TABLE users ---
+Table	Create Table
+users	CREATE TABLE `users` (\n  `id` bigint NOT NULL AUTO_INCREMENT,\n  `username` varchar(32) DEFAULT NULL,\n  `password_hash` varchar(100) DEFAULT NULL,\n  `wechat_openid` varchar(64) DEFAULT NULL,\n  `unionid` varchar(64) DEFAULT NULL,\n  `nickname` varchar(32) NOT NULL DEFAULT '',\n  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,\n  PRIMARY KEY (`id`),\n  UNIQUE KEY `uk_username` (`username`),\n  UNIQUE KEY `uk_openid` (`wechat_openid`)\n) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+section
+--- SHOW CREATE TABLE recognition_tasks ---
+Table	Create Table
+recognition_tasks	CREATE TABLE `recognition_tasks` (\n  `id` bigint NOT NULL AUTO_INCREMENT,\n  `user_id` bigint NOT NULL,\n  `task_id` varchar(64) DEFAULT NULL,\n  `oss_object` varchar(255) NOT NULL,\n  `status` varchar(16) NOT NULL DEFAULT 'PENDING',\n  `duration_sec` int DEFAULT NULL,\n  `speaker_mapping_confirmed` tinyint(1) NOT NULL DEFAULT '0',\n  `error_msg` varchar(500) DEFAULT NULL,\n  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,\n  `finished_at` datetime DEFAULT NULL,\n  PRIMARY KEY (`id`),\n  KEY `idx_user` (`user_id`),\n  KEY `idx_task` (`task_id`)\n) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+section
+--- SHOW CREATE TABLE sentences ---
+Table	Create Table
+sentences	CREATE TABLE `sentences` (\n  `id` bigint NOT NULL AUTO_INCREMENT,\n  `task_id` bigint NOT NULL,\n  `speaker_id` int DEFAULT NULL,\n  `start_ms` bigint NOT NULL,\n  `end_ms` bigint NOT NULL,\n  `text` text NOT NULL,\n  `speech_speed` int DEFAULT NULL,\n  `flagged` tinyint(1) NOT NULL DEFAULT '0',\n  `rule_ref` varchar(255) DEFAULT NULL,\n  PRIMARY KEY (`id`),\n  KEY `idx_task` (`task_id`)\n) ENGINE=InnoDB AUTO_INCREMENT=11 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+section
+--- 行数 ---
+tbl	rows_cnt
+users	1
+recognition_tasks	3
+sentences	5
+section
+--- 旧状态取值分布（迁移不得改写） ---
+status	cnt
+COMPLETED	2
+ONGOING	1
+section
+--- 迁移前结构指纹（cols_fp / idx_fp / chk_fp） ---
+TABLE_NAME	cols_fp	idx_fp	chk_fp
+recognition_tasks	f3cd1680ae2bd98c55b0a76747bb6206	d08cd92fab39a31c194f9c5844449dc0	<none>
+sentences	1b6d6be4fa3f53708c5f1d716ce43ccc	2adbb1dcbda39cbbabd77c73e602345d	<none>
+users	681f24684e6f316a1ae8a593f8d46072	3ef9403a4275820119e1876cb15858ac	<none>
+users	c87e49bb689fdede500cf96ce8eab92d
+recognition_tasks	6fb6360ce35a3bfc8116ea52aee2b722
+sentences	017fd7a570310b29fa295b2f7af2cd46
