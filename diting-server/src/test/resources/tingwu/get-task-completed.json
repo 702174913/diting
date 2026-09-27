@@ -1,0 +1,13 @@
+{
+  "RequestId": "REQ-0000-SANITIZED",
+  "Code": "0",
+  "Message": "success",
+  "Data": {
+    "TaskId": "tw-task-0001",
+    "TaskStatus": "COMPLETED",
+    "Result": {
+      "Transcription": "https://tingwu-result.example.com/transcription/tw-task-0001.json",
+      "Summarization": "https://tingwu-result.example.com/summary/tw-task-0001.json"
+    }
+  }
+}

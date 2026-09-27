@@ -1,0 +1,32 @@
+{
+  "_comment": "脱敏契约样本：字段名与层级按听悟离线转写结果整理，数值与文本均为合成内容",
+  "Transcription": {
+    "Paragraphs": [
+      {
+        "ParagraphId": "p0",
+        "SpeakerId": "2",
+        "Words": [
+          { "Id": 1, "SentenceId": 1, "Text": "喂，", "Start": 900, "End": 1200 },
+          { "Id": 2, "SentenceId": 1, "Text": "你好。", "Start": 1200, "End": 1800 }
+        ]
+      },
+      {
+        "ParagraphId": "p1",
+        "SpeakerId": "1",
+        "Words": [
+          { "Id": 3, "SentenceId": 2, "Text": "你好，", "Start": 0, "End": 600 },
+          { "Id": 4, "SentenceId": 2, "Text": "我", "Start": 600, "End": 900 }
+        ]
+      },
+      {
+        "ParagraphId": "p2",
+        "SpeakerId": "1",
+        "Words": [
+          { "Id": 5, "SentenceId": 3, "Text": "这句话", "Start": 2000, "End": 2600 },
+          { "Id": 6, "SentenceId": 3, "Text": "没有", "Start": 2600, "End": 3000 },
+          { "Id": 7, "SentenceId": 3, "Text": "标点", "Start": 3000, "End": 3400 }
+        ]
+      }
+    ]
+  }
+}

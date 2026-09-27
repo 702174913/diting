@@ -1,0 +1,125 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: diting-server
+  datasource:
+    url: "jdbc:mysql://127.0.0.1:3306/diting?useUnicode=true&\
+      characterEncoding=utf8&serverTimezone=Asia/Shanghai"
+    username: ${DITING_DB_USERNAME:root}
+    # 库密码只走环境变量（DITING_DB_PASSWORD），不写进配置文件
+    password: ${DITING_DB_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    banner: false
+
+# 谛听业务配置（密钥只存服务端，绝不进前端）
+diting:
+  # CORS 允许来源（逗号分隔；[*] 可通配端口）。
+  # 同源部署本不该触发 CORS，但反向代理若没透传原始 Host，Spring 会拿 Origin 与 Host
+  # 比对并把同源请求误判成跨域，进而校验来源 —— 部署域名不在名单里就 403 Invalid CORS request。
+  # 生产把部署域名配进来即可（不必改代码，也不必依赖 nginx 传对 Host）：
+  #   DITING_CORS_ORIGINS=https://diting.example.com
+  # 多个用逗号分隔；填 * 表示放行任意来源。本项目认证走 Authorization: Bearer（不是 Cookie），
+  # 跨站请求无法自动带上凭据，所以即便放开也不会被冒用身份，但仍建议按域名收敛。
+  cors:
+    allowed-origin-patterns: ${DITING_CORS_ORIGINS:http://localhost:[*],http://127.0.0.1:[*]}
+  jwt:
+    # 密钥只走环境变量（DITING_JWT_SECRET）：泄露即可伪造任意身份域 token
+    secret: ${DITING_JWT_SECRET}
+    expire-hours: 72
+  # 后台初始账号：仅首次启动且库中无 ADMIN 时创建，密码用环境变量注入，文件里不写真实值
+  admin:
+    init-username: ${DITING_ADMIN_INIT_USERNAME:}
+    init-password: ${DITING_ADMIN_INIT_PASSWORD:}
+  wechat:
+    appid: 请替换
+    secret: 请替换
+  # 媒体边界：真实支持范围由 POC 决定，未经真机验证前保持保守值
+  media:
+    allowed-formats: m4a,mp3,wav,amr,aac,flac
+    max-size-bytes: 52428800
+    # 图片（S16）：格式与上限对齐阿里云 OCR 受理范围（HEIC 不在其中）
+    allowed-image-formats: jpg,jpeg,png,webp,bmp,gif,tiff,tif
+    max-image-bytes: 10485760
+    max-images-per-task: 6
+    asset-url-ttl-minutes: 15
+    sign-ttl-minutes: 15
+    session-ttl-hours: 24
+  # 对象存储：auto 按凭据判断；oss 强制真实 OSS；memory 仅供测试（重启即丢）
+  storage:
+    type: auto
+  # 保留期与清理：原件 30 天；文本/审计期限未确认前不动
+  retention:
+    enabled: true
+    audio-days: 30
+    batch-size: 20
+    max-attempts: 4
+    lease-seconds: 300
+    backoff-seconds: 60
+    tick-interval-ms: 60000
+  # PDF/ZIP 导出：固定模板 + 合法授权的中文字体（缺失即 503，不产出空 PDF）
+  export:
+    enabled: true
+    artifact-ttl-hours: 24
+    download-ttl-minutes: 15
+    max-artifact-bytes: 67108864
+    batch-size: 3
+    tick-interval-ms: 3000
+    # 中文字体（需持有合法授权，如思源黑体/Noto Sans SC，OFL 授权）；文件缺失或不可读时导出返回 503 NOT_CONFIGURED
+    font-path: ${DITING_EXPORT_FONT_PATH:/System/Library/Fonts/Supplemental/Arial Unicode.ttf}
+  # 后台作业：租约 + 退避 + 有限重试
+  pipeline:
+    enabled: true
+    batch-size: 5
+    lease-seconds: 60
+    poll-interval-seconds: 10
+    backoff-seconds: 30
+    max-attempts: 5
+    tick-interval-ms: 5000
+  aliyun:
+    # 仅服务端注入；缺失时保留占位值，由客户端配置检测返回 NOT_CONFIGURED
+    access-key-id: ${DITING_ALIYUN_ACCESS_KEY_ID:请替换}
+    access-key-secret: ${DITING_ALIYUN_ACCESS_KEY_SECRET:请替换}
+    oss:
+      # 预签名地址会交给客户端/听悟使用，须配置与 bucket 同地域的 HTTPS 公网端点
+      endpoint: ${DITING_OSS_ENDPOINT:oss-cn-hangzhou.aliyuncs.com}
+      bucket: ${DITING_OSS_BUCKET:请替换}
+    tingwu:
+      app-key: ${DITING_TINGWU_APP_KEY:请替换}
+      # 异步识别结果回调：官方契约是「回调地址在听悟管控台按项目配置」（HTTP post），
+      # CreateTask 里只有 Input.ProgressiveCallbacksEnabled=true、没有 URL 参数；
+      # 这个 path 只用于启动日志提示管控台该填什么地址
+      callback-path: /api/callback/tingwu
+      # auto（按凭据判断）/ stub（仅测试）
+      type: auto
+      # 催收通话按双人采集；单人/多人录音强制双人可能误分，按业务场景调整此值（0=自动判断）
+      diarization-speaker-count: 2
+      # 源语言：官方取值 cn/en/yue/ja/fspk（中文是 cn）
+      source-language: cn
+      # 官方示例里结果链接出现过 http：只对受信任后缀放开，其余仍强制 https
+      allow-http-result: true
+      http-result-host-suffixes: aliyuncs.com
+      # 回调路径共享令牌：管控台把地址配成 {public-base-url}{callback-path}/{token}
+      # 官方 HTTP 回调没有验签字段（2026-09-27 核对），故用路径令牌；
+      # 为空=未配置=只按 callback-rate-per-minute 做 IP 限流；生产建议配置（只走环境变量）
+      callback-token: ${DITING_TINGWU_CALLBACK_TOKEN:}
+      # 未配令牌时的回调限流（单 IP、每分钟）：任务量大时调大或改用令牌
+      callback-rate-per-minute: 60
+      # 对外基础地址（如 https://api.example.com），仅用于启动日志拼出管控台要填的地址
+      public-base-url: ${DITING_PUBLIC_BASE_URL:}
+    # 图片 OCR（S16）：与听悟共用 AccessKey，但需单独开通「通用文字识别」
+    ocr:
+      # auto（按凭据判断）/ stub（仅测试用桩客户端）
+      type: auto
+      # 服务接入点；默认杭州，跨地域时在配置里覆盖
+      endpoint: ocr-api.cn-hangzhou.aliyuncs.com
+
+logging:
+  level:
+    com.diting: info
