@@ -33,18 +33,25 @@
 6. **资产与隐私**：图片是用户内容，随记录一起到期（30 天，从上传时间起算）、一起被删除/抹除；
    对象 key 服务端生成、不返回给客户端；回显走短期预签名。
 
-## 3. 阿里云 OCR 官方契约核对（核验日期：2026-09-24）
+## 3. 阿里云 OCR 官方契约核对（初版核验：2026-09-24；**2026-09-27 迁到统一识别**）
 
-来源：阿里云官方文档 [RecognizeGeneral - 通用文字识别](https://help.aliyun.com/zh/ocr/developer-reference/api-ocr-api-2021-07-07-recognizegeneral)（OpenAPI `ocr-api` 2021-07-07）。
+**当前默认**：`RecognizeAllText`（[官方文档](https://help.aliyun.com/zh/ocr/developer-reference/api-ocr-api-2021-07-07-recognizealltext)，
+统一识别，开通项 `ocr_unity_public_cn`），`Type=General`（通用文字识别基础版，官方**必填单选**）。
+旧接口 `RecognizeGeneral` 保留一键回滚开关（`diting.aliyun.ocr.api=general`）；
+两条路径解析出的「行」必须一致（`OcrParserTest` 锁住），换接口不改变判读口径。
 
-| 项 | 官方取值 | 与项目的关系 |
+| 项 | 官方取值（AllText + Type=General） | 与项目的关系 |
 |---|---|---|
-| 入参 | `Url` **或** `body` 二选一，不可同时传或同时为空 | 采用 **body（二进制）**：图片在私有 OSS 里，交给云端拉 URL 会受桶策略限制 |
-| 图片格式 | PNG、JPG、JPEG、BMP、GIF、TIFF、WebP；**不支持 PDF** | 白名单按此设定；**HEIC 不在支持范围**（iOS 拍照默认格式，需前端转换或提示用户换图） |
-| 图片大小 | 二进制 ≤ **10MB**；建议 <1.5MB | 单张上限设 10MB，并在 complete 阶段复核 |
-| 尺寸 | 长宽 15–8192px，长宽比 <50 | 作为预检提示，不做硬校验（超出由云端返回错误码） |
-| 返回 | `RequestId`、`Data`（**字符串**，内容是 JSON：`content` 全文 + `prism_wordsInfo[]` 文字块 + 宽高）、`Code`/`Message`（出错时） | 解析 `Data` 再取 `prism_wordsInfo[].word`，按坐标（先 y 后 x）排序成阅读顺序 |
-| 授权 | RAM 策略 `AliyunOCRFullAccess`；需开通「通用文字识别」服务 | 与听悟/OSS 同一 AccessKey，**上线前需确认已开通且有免费额度或资源包** |
+| 入参 | `Url` 或 `body` 二选一；`Type` **必填且单选** | 固定走 **body（二进制）**：图片在私有 OSS 里，交云端拉 URL 会受桶策略限制；`Type` 固定 `General` |
+| 可选输出 | `OutputFigure/Qrcode/BarCode/Stamp/Coordinate/OutputOricoord/…` | **一个都不开**：官方参数表里 General 不支持 `OutputCoordinate` 与 `AdvancedConfig`（没坐标、没成行/分段/表格），其余增强项对催收截图无意义且增加响应时间 |
+| 图片格式 | PNG/JPG/JPEG/BMP/GIF/TIFF/WebP**/PDF** | 白名单仍是图片那七类，**不收 PDF**（前端没有 PDF 选择与预览，导出/保留期/清理也没按 PDF 做过） |
+| 图片大小 | 二进制 ≤10MB | 一致（单张 10MB、单任务 ≤6 张） |
+| 尺寸 | 长宽 >15 且 <8192 像素，长宽比 <50 | 上传校验与调用前各预检一次（`ImageDimensionProbe`，阈值可配 `diting.media.min-image-pixels / max-image-pixels / max-image-aspect-ratio`） |
+| 返回 | `Data` 是**对象**：`Content` 全文 + `Height/Width/SubImageCount/SubImages[].BlockInfo.BlockDetails[]{BlockId, BlockContent, BlockAngle, BlockConfidence}` | 行来自 `Content` 的换行；无换行时退回按 `BlockId` 顺序切文字块（General 不给坐标，所以不猜坐标）；SDK 已有完整类型化模型 |
+| 授权 | RAM 策略 `AliyunOCRFullAccess`；需先开通「**OCR 统一识别**」 | 与听悟/OSS 同一 AccessKey；**上线前需确认已开通且有免费额度或资源包** |
+
+> 旧接口 `RecognizeGeneral`（回滚开关）：`Data` 是**内嵌 JSON 的字符串**，含 `content` + `prism_wordsInfo[]`
+> 词块与坐标；按坐标（先 y 后 x）排序归并行。保留该路径只为回滚，不再作为默认。
 
 ## 4. 已完成
 
@@ -87,8 +94,64 @@
 
 - **迁移未执行**：本会话没有 MySQL 密码（按密码纪律只走环境变量），无法应用 V4 或做迁移冒烟；
   执行方式见脚本头（先备份真实库，再 `mysql -D <db> < V4__S16_media_assets.sql`）。回滚脚本已具备护栏。
-- **OCR 未联调**：需要开通「通用文字识别」服务 + RAM 授权 + 计费确认；无凭据时按项目纪律返回 503，
-  不伪造识别结果。
+- **OCR 未联调**：需先开通「**OCR 统一识别**」（`RecognizeAllText` 的开通项，与旧的「通用文字识别」不同；
+  `api=general` 回退时才需要后者）+ RAM 授权 `AliyunOCRFullAccess` + 计费确认；无凭据时按项目纪律返回 503，
+  不伪造识别结果。**2026-09-27 已补强失败可观测性**：云端错误码（`ocrServiceNotOpen`/`noPermission` 等）
+  现在会落到 `task_assets.ocr_error` 并在后台图片清单展示，联调时不必再猜「没开通」还是「图坏了」（见 §7）。
 - **HEIC**：iPhone 默认拍照格式不在 OCR 支持范围，需前端在选择时转换或提示；
   本记录先按「只接受白名单格式」实现。
 - **E2E 未跑**：S16 的端到端脚本需要专用测试库凭据，本会话无法执行；结论不冒充已通过。
+
+---
+
+## 7. 官方契约补强（2026-09-27，按官方 API 文档与错误码表逐条核对后修）
+
+对照 [RecognizeGeneral](https://help.aliyun.com/zh/ocr/developer-reference/api-ocr-api-2021-07-07-recognizegeneral)
+与[错误码表](https://help.aliyun.com/zh/ocr/developer-reference/api-ocr-api-2021-07-07-errorcodes)核对实现，
+接口/字段层面全部对齐（SDK `ocr_api20210707:3.1.3` 的 `setBody(InputStream)` 与 `getBody().getData()`
+用 `javap` 逐签名核过）。本轮修三处**文档要求但实现没跟上**的地方：
+
+1. **尺寸硬约束不做预检（已修）**：官方要求长宽大于 15 像素、小于 8192 像素、长宽比小于 50，
+   而此前只查大小与格式。超限的图云端只回 `illegalImageSize`——一次必然失败的付费调用，还会被重试。
+   新增 `ImageDimensionProbe`（只读文件头/段头，支持 PNG/GIF/BMP/JPEG/WebP 三种块/TIFF，
+   **探测不出就返回 null 不拦**），在 `UploadSessionService.complete`（上传校验）与 `OcrService.recognize`
+   （调用云端前，用完整字节）各查一次；阈值可配 `diting.media.min-image-pixels / max-image-pixels /
+   max-image-aspect-ratio`。注意错误码表里 `illegalImageSize` 写的下界是 5 像素，接口文档写 15，取更严的 15。
+2. **云端错误码被吞掉（已修）**：以前 `Data` 为空就抛 `BizException(INTERNAL_ERROR)`，管线落库写的是常量
+   `INTERNAL_ERROR`，而 `ocr_error` 列在三端界面都没展示——线上分不清「服务没开通」还是「图坏了」。
+   新增 `OcrApiException`（带官方错误码 + 是否值得重试），`AliyunOcrApi` 同时处理「响应体带 `Code`」与
+   「SDK 抛 `TeaException`」两条失败路径；管线据此分流：**可重试**（`Throttling.*`、`algorithmError`、
+   `ServiceUnavailable`、超时、网络中断、未知码）记码后重试，**不可重试**（`noPermission`、
+   `ocrServiceNotOpen`、`OcrServiceExpired`、`unsupportedImageFormat`、`illegalImageSize`、
+   `exceededImageContent` 等）当次置 `EXHAUSTED`（新增 `TaskOcrWriter.abandon`，仍走租约令牌 CAS），
+   任务判 `FAILED` 且 `errorCode=OCR_REJECTED`；本地预检拒绝（`UNPROCESSABLE`/`FORBIDDEN`/`BAD_REQUEST`）同样当次判死。
+   错误码经 `GET /api/.../assets` 的 `ocrError` 字段下发，后台录音详情图片清单展示（未映射的错误码原样显示，
+   不假装认识）；`OCR_STATUS_TEXT` 补上了此前会露英文码的 `EXHAUSTED`。
+3. **耗时无留痕（已加）**：每张图识别完成打一条 info 日志（行数 + 毫秒），用于判断是否需要按官方建议
+   对 >1.5MB 的图改用 `Url` 方式（当前固定走 `body`，因为图片在私有 OSS 里）。
+
+**仍未做/未定论**：
+
+- **真实联调**：一次都没跑过（无凭据）。上面三条都是「代码 ↔ 文档」对照的结论，不是实测。
+- **旋转/竖排文字的阅读顺序（推断，未定论）**：官方 `prism_wordsInfo[].angle`（示例里就有 `-88`）与
+  `direction` 我们仍未读取，`OcrParser.groupLines` 只按 `y` 主排序。整页旋转或竖排的图可能行归并错位，
+  但**没有真实样本可证伪**，因此按纪律不改排序口径——等首次真实识别时特意传一张横拍图看结果再定。
+- **计费对账**：官方明确有免费额度 + 需购资源包，上线清单要求首日对账，未做。
+
+---
+
+## 8. 迁到统一识别 RecognizeAllText（2026-09-27，按用户指定的官方文档）
+
+- **接口**：默认 `RecognizeAllText`（`Type=General`，`diting.aliyun.ocr.image-type`），
+  `diting.aliyun.ocr.api=alltext|general` 一键回滚到旧接口。选择 General 的理由：与旧接口同为「基础版」
+  识别能力，但接口统一、结构更规整（带 BlockId/置信度）；**效果上不要期待比 RecognizeGeneral 更好**——
+  想要更高识别率得换 `Type=Advanced` 高精版，那要同时核对官方参数表与计费。
+- **解析**：`OcrParser` 两套结构都认（字段名大小写不敏感：官方报文 PascalCase、SDK 模型 camelCase），
+  出口不变——「按阅读顺序排好的行」；中文之间的排版空格去掉（与旧接口词块拼接口径一致），英文单词间保留。
+  General 无坐标，所以阅读顺序只看官方换行与 `BlockId`，不再做坐标归并。
+- **顺带修掉的真实缺陷（已用代码执行证实 + 加了回归测试）**：`task_assets.ocr_text` 存的是**行文本**，
+  而 `TaskTextWriter.rebuildImages` 曾把它当 `RecognizeGeneral` 的 `Data` JSON 二次解析 →
+  `OcrParseException`，真实链路上图片句子永远重建不出来（任务在 `TRANSCRIBING/PARSING` 间反复失败），
+  单测因 `selectByTask → List.of()` 的空桩而掩盖。现在两边统一为「`'\n'` 拼接的行文本」，
+  旧数据（同样是行文本）无需迁移即可被正确切行；已加「落库口径闭环」回归测试并用变异验证能抓到旧行为。
+- **未做**：真实云联调（无凭据）、PDF、`Advanced` 的坐标/成行/表格（General 用不上）。

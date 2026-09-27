@@ -10,7 +10,7 @@
 |---|---|---|
 | OSS 上传 | S04（开发文档 §5.1/§6.2） | ✅ 服务端签发预签名 + 客户端**原始字节 PUT**（非 multipart）；objectKey 服务端生成 `recordings/{userId}/{uuid}.{ext}`；complete 用 HEAD + 文件头嗅探复核，ETag 存 `content_hash` |
 | 听悟 | S05（官方 CreateTask/GetTaskInfo） | ✅ 参数在 `Parameters.Transcription`；响应统一读 **`Data` 层**；只有 `COMPLETED` 才读 `Result.Transcription`；未完成返回 409 PROCESSING；结果下载仅 HTTPS + 私网拒绝 |
-| OCR | S16（官方 RecognizeGeneral 2021-07-07） | ✅ 走 **body 二进制**（≤10MB，PNG/JPG/JPEG/BMP/GIF/TIFF/WebP，**不支持 HEIC/PDF**）；`Data` 是**字符串**，内嵌 JSON |
+| OCR | S16（官方 RecognizeAllText / General，旧接口 RecognizeGeneral 保留回滚开关） | ✅ 走 **body 二进制**（≤10MB，PNG/JPG/JPEG/BMP/GIF/TIFF/WebP，**不收 HEIC/PDF**）；AllText 的 `Data` 是**对象**（`Content` + `SubImages[].BlockInfo.BlockDetails[]`），适配层序列化成 JSON 后由一个解析器统一读 |
 
 ⚠️ 唯一阻塞项：**V4 迁移未执行**（`diting` 库无 `task_assets` 表），图片/OCR 链路落库会失败。执行方式见 §5。
 
@@ -67,20 +67,27 @@ GetTaskInfo 响应（状态：`QUEUEING/ONGOING/COMPLETED/FAILED`；只有 COMPL
 ```
 解析规则：按 `Start` 时间排序、`sequence` 从 1 连续；缺 `Paragraphs/Words/Start/End`、时间倒挂、`SpeakerId` 非数字 → 422；`Paragraphs` 为空 → 空结果（任务 INVALID）。样本：`src/test/resources/tingwu/transcription-sample.json`。
 
-### 3.3 OCR RecognizeGeneral（`StubOcrApi` 固定返回）
+### 3.3 OCR 统一识别 RecognizeAllText（`StubOcrApi` 固定返回）
 
-`recognize()` 返回**字符串**，内容为 JSON（与官方 `Data` 同构）：
+默认走统一识别（`diting.aliyun.ocr.api=alltext`，`Type=General`）；`recognize()` 返回官方 `Data` 的 JSON：
 ```json
 {
-  "content": "我保证能减免利息。\n请你今天把款还上。",
-  "prism_wordsInfo": [
-    { "word": "我保证能减免利息。", "pos": [{ "x": 20, "y": 30 }], "height": 24, "width": 200 },
-    { "word": "请你今天把款还上。", "pos": [{ "x": 20, "y": 70 }], "height": 24, "width": 180 }
-  ],
-  "prism_wnum": 2, "height": 200, "width": 400
+  "Content": "我保证能减免利息。\n请你今天把款还上。",
+  "SubImageCount": 1,
+  "SubImages": [{ "SubImageId": 0, "Type": "general", "Angle": 0, "BlockInfo": { "BlockCount": 2, "BlockDetails": [
+    { "BlockId": 0, "BlockContent": "我保证能减免利息。", "BlockConfidence": 98 },
+    { "BlockId": 1, "BlockContent": "请你今天把款还上。", "BlockConfidence": 97 } ] } }],
+  "Height": 200, "Width": 400
 }
 ```
-解析规则：取每个 `word` + `pos[0]` 坐标，按先 y 后 x 排成阅读顺序；缺 `prism_wordsInfo` 或坐标非法 → `OcrParseException`。桩里第一行「我保证能减免利息。」是刻意命中的违规话术，可触发规则判读。
+解析规则：`Content` 有换行就按换行切行；没有换行（整段一坨）时退回按 `BlockId` 顺序切文字块——
+`Type=General` 官方不返回坐标，所以不猜坐标；字段名大小写不敏感（官方报文 PascalCase、SDK 模型 camelCase）。
+中文之间的排版空格会去掉（规则按中文短语匹配），英文单词间的空格保留。
+桩里第一行「我保证能减免利息。」是刻意命中的违规话术，可触发规则判读。
+
+回滚开关 `diting.aliyun.ocr.api=general` 时走旧接口 `RecognizeGeneral`：其 `Data` 是**内嵌 JSON 的字符串**
+（`content` + `prism_wordsInfo[]` 词块与坐标，按坐标先 y 后 x 归并行），桩数据见 `StubOcrApi.STUB_LEGACY_DATA`。
+**两条路径解析出的行必须一致**（`OcrParserTest` 锁住）；结构非法（两套都不匹配、坐标缺失）一律 `OcrParseException`。
 
 ### 3.4 OSS 上传协议（`memory` 存储同构）
 
