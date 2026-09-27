@@ -40,6 +40,17 @@ public interface TaskAssetMapper extends BaseMapper<TaskAsset> {
         + "AND (ocr_lease_until IS NULL OR ocr_lease_until <= NOW(3))))")
     int exhaustOcr(@Param("id") Long id, @Param("taskId") Long taskId, @Param("maxAttempts") int maxAttempts);
 
+    /**
+     * 云端明确拒绝（开通/权限/图片本身的问题）：**不再等重试次数用尽**，当次即置终态并留下原因。
+     * 仍按租约令牌 CAS，迟到的旧工作者不能改写结论。
+     */
+    @Update("UPDATE task_assets SET ocr_status='EXHAUSTED', ocr_error=#{error}, ocr_attempts=#{maxAttempts}, "
+        + "ocr_lease_token=NULL, ocr_lease_until=NULL, ocr_done_at=NOW(3) "
+        + "WHERE id=#{id} AND task_id=#{taskId} AND object_purged=0 AND ocr_status='RUNNING' "
+        + "AND ocr_lease_token=#{token} AND ocr_lease_until > NOW(3)")
+    int abandonOcr(@Param("id") Long id, @Param("taskId") Long taskId, @Param("token") String token,
+                   @Param("maxAttempts") int maxAttempts, @Param("error") String error);
+
     @Select("SELECT COUNT(*) FROM task_assets WHERE task_id=#{taskId} AND kind='IMAGE' "
         + "AND ocr_status IN ('PENDING','FAILED','RUNNING')")
     int countUnfinishedOcr(@Param("taskId") Long taskId);

@@ -49,4 +49,14 @@ public class TaskOcrWriter {
         lock(task);
         return assets.exhaustOcr(assetId, task.getId(), maxAttempts) == 1;
     }
+
+    /**
+     * 云端明确拒绝（未开通/无权限/图片本身）：当次即置终态，不再等重试次数用尽。
+     * 与 {@link #exhaust} 的区别是「不重试」这个结论来自云端的错误码，而不是次数耗尽。
+     */
+    @Transactional
+    public boolean abandon(RecognitionTask task, Long assetId, String token, int maxAttempts, String error) {
+        lock(task);
+        return assets.abandonOcr(assetId, task.getId(), token, maxAttempts, error) == 1;
+    }
 }

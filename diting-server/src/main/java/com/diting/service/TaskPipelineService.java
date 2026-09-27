@@ -13,6 +13,7 @@ import com.diting.entity.TaskAsset;
 import com.diting.mapper.RecognitionTaskMapper;
 import com.diting.mapper.SentenceMapper;
 import com.diting.mapper.TaskAssetMapper;
+import com.diting.service.ocr.OcrApiException;
 import com.diting.service.ocr.OcrParseException;
 import com.diting.service.ocr.OcrParser;
 import com.diting.service.report.ReportService;
@@ -55,6 +56,8 @@ public class TaskPipelineService {
     public static final String ERR_PARSE_FAILED = "PARSE_FAILED";
     public static final String ERR_NO_REPORT = "NO_PUBLISHED_REPORT";
     public static final String ERR_OCR_FAILED = "OCR_FAILED";
+    /** OCR 被云端明确拒绝（未开通/无权限/图片本身不合法）：不再自动重试 */
+    public static final String ERR_OCR_REJECTED = "OCR_REJECTED";
     public static final String ERR_NO_TEXT = "NO_USABLE_TEXT";
 
     private final RecognitionTaskMapper taskMapper;
@@ -162,9 +165,20 @@ public class TaskPipelineService {
         }
     }
 
-    /** OCR 的三种走向：全部处理完 / 本轮失败需重试 / 停在这里（未配置，不算失败） */
+    /** OCR 的走向：处理完 / 本轮失败需重试 / 停在这里（未配置，不算失败）/ 次数用尽 / 云端明确拒绝 */
     private enum OcrOutcome {
-        DONE, RETRY, STOP, EXHAUSTED
+        DONE, RETRY, STOP, EXHAUSTED, REJECTED
+    }
+
+    /**
+     * 一轮 OCR 扫描的结果：走向 + 失败标记。
+     * 单独带一个标记而不是只用枚举，是因为「为什么失败」必须留在资产行与任务上：
+     * 以前不管什么失败都只记常量 INTERNAL_ERROR，线上分不清「服务没开通」和「图坏了」。
+     */
+    private record OcrScan(OcrOutcome outcome, String failureMark) {
+        static OcrScan of(OcrOutcome outcome) {
+            return new OcrScan(outcome, null);
+        }
     }
 
     /**
@@ -173,8 +187,8 @@ public class TaskPipelineService {
      * - 含音频：音频已解析、图片刚识别完，直接按听悟 SpeakerId 发布报告。
      */
     private boolean finishOcr(RecognitionTask task, TaskStatus stayState, boolean hasAudioText) {
-        OcrOutcome outcome = ocrPendingImages(task);
-        return switch (outcome) {
+        OcrScan scan = ocrPendingImages(task);
+        return switch (scan.outcome()) {
             case DONE -> {
                 if (hasAudioText) {
                     yield publishWithoutRoles(task);
@@ -190,29 +204,35 @@ public class TaskPipelineService {
             case STOP -> false;
             case EXHAUSTED -> backoff(task, TaskStatus.FAILED, ERR_OCR_FAILED,
                 "图片识别多次失败，已停止重试，请联系管理员处理");
+            case REJECTED -> backoff(task, TaskStatus.FAILED, ERR_OCR_REJECTED,
+                "图片识别被云端拒绝（" + scan.failureMark() + "），已停止重试："
+                    + "请检查「通用文字识别」是否开通、RAM 是否已授 AliyunOCRFullAccess，或换一张图片重新提交");
         };
     }
 
     /**
-     * 识别待处理的图片（PENDING/FAILED）。
-     * 逐张推进：成功即写回识别结果并刷新句子，失败按任务级次数上限重试，避免重复付费。
+     * 识别待处理的图片（PENDING/FAILED/RUNNING 且租约过期）。
+     * 逐张推进：成功即写回识别结果并刷新句子；失败按**原因**分流——
+     * 网络中断/限流/云端 5xx 等有限重试；云端明确拒绝（未开通、无权限、图片本身不合法）当次即置终态，
+     * 不再拿同一张图反复付费重试。
      */
-    private OcrOutcome ocrPendingImages(RecognitionTask task) {
+    private OcrScan ocrPendingImages(RecognitionTask task) {
         if (!ocrService.isConfigured()) {
             // 没有 OCR 凭据：不动状态、不判失败，等配置好再继续（与听悟未配置一致）
-            return OcrOutcome.STOP;
+            return OcrScan.of(OcrOutcome.STOP);
         }
         List<TaskAsset> pending = taskAssetMapper.selectImagesToOcr(task.getId());
         int maxAttempts = Math.max(1, props.getPipeline().getMaxAttempts());
         if (pending.isEmpty()) {
-            return taskAssetMapper.countExhaustedOcr(task.getId()) > 0 ? OcrOutcome.EXHAUSTED : OcrOutcome.DONE;
+            return OcrScan.of(taskAssetMapper.countExhaustedOcr(task.getId()) > 0
+                ? OcrOutcome.EXHAUSTED : OcrOutcome.DONE);
         }
         boolean allDone = true;
         for (TaskAsset asset : pending) {
             int attempts = asset.getOcrAttempts() == null ? 0 : asset.getOcrAttempts();
             if (attempts >= maxAttempts) {
                 if (ocrWriter.exhaust(task, asset.getId(), maxAttempts)) {
-                    return OcrOutcome.EXHAUSTED;
+                    return OcrScan.of(OcrOutcome.EXHAUSTED);
                 }
                 allDone = false; // another worker still holds an unexpired lease
                 continue;
@@ -223,34 +243,68 @@ public class TaskPipelineService {
                 continue;
             }
             OcrParser.ParsedOcr parsed;
+            long startedAt = System.nanoTime();
             try {
                 byte[] bytes = objectStorage.read(asset.getObjectKey());
                 if (bytes == null) {
-                    ocrWriter.finish(task, asset.getId(), token, TaskAsset.OCR_FAILED, null, "OBJECT_MISSING");
-                    return OcrOutcome.RETRY;
+                    ocrWriter.finish(task, asset.getId(), token, TaskAsset.OCR_FAILED, null,
+                        TaskAsset.OCR_ERROR_OBJECT_MISSING);
+                    return OcrScan.of(OcrOutcome.RETRY);
                 }
                 parsed = ocrService.recognize(bytes);
+            }
+            catch (OcrApiException e) {
+                String mark = e.errorMark();
+                log.warn("任务 {} 图片资产 {} OCR 失败：code={}，可重试={}", task.getId(), asset.getId(),
+                    e.getCode() == null ? mark : e.getCode(), e.isRetryable());
+                if (e.isRetryable()) {
+                    ocrWriter.finish(task, asset.getId(), token, TaskAsset.OCR_FAILED, null, mark);
+                    return OcrScan.of(OcrOutcome.RETRY);
+                }
+                // 云端明确拒绝：当次即终态，不再等次数用尽（同一张图重试只会重复付费）
+                ocrWriter.abandon(task, asset.getId(), token, maxAttempts, mark);
+                return new OcrScan(OcrOutcome.REJECTED, mark);
             }
             catch (BizException e) {
                 if (e.getResultCode() == ResultCode.CONFLICT) {
                     throw e;
                 }
-                ocrWriter.finish(task, asset.getId(), token, TaskAsset.OCR_FAILED, null,
-                    String.valueOf(e.getResultCode().getSymbol()));
-                return e.getResultCode() == ResultCode.NOT_CONFIGURED ? OcrOutcome.STOP : OcrOutcome.RETRY;
+                String mark = String.valueOf(e.getResultCode().getSymbol());
+                ocrWriter.finish(task, asset.getId(), token, TaskAsset.OCR_FAILED, null, mark);
+                if (e.getResultCode() == ResultCode.NOT_CONFIGURED) {
+                    return OcrScan.of(OcrOutcome.STOP);
+                }
+                if (isPermanentOcrInputError(e.getResultCode())) {
+                    // 本地预检拒绝（尺寸/格式/归属）：同一张图重试无用，当次即终态
+                    log.warn("任务 {} 图片资产 {} 预检拒绝：{}", task.getId(), asset.getId(), e.getMessage());
+                    ocrWriter.abandon(task, asset.getId(), token, maxAttempts, mark);
+                    return new OcrScan(OcrOutcome.REJECTED, mark);
+                }
+                return OcrScan.of(OcrOutcome.RETRY);
             }
             catch (Exception e) {
-                ocrWriter.finish(task, asset.getId(), token, TaskAsset.OCR_FAILED, null, "OCR_UNCERTAIN");
-                return OcrOutcome.RETRY;
+                ocrWriter.finish(task, asset.getId(), token, TaskAsset.OCR_FAILED, null,
+                    TaskAsset.OCR_ERROR_UNCERTAIN);
+                return OcrScan.of(OcrOutcome.RETRY);
             }
             // 提交阶段不在调用云端的 catch 内；落库/结算失败时须交事务回滚和告警，不可再标为 OCR 失败。
+            // 落库的是**归一化后的行文本**（'\n' 分隔），不是官方 Content：
+            // TaskTextWriter 按同一口径切行即可重建句子，不必（也不能）把 ocr_text 当 JSON 二次解析。
+            log.info("任务 {} 图片资产 {} OCR 完成：{} 行文本，耗时 {} ms", task.getId(), asset.getId(),
+                parsed.lines().size(), (System.nanoTime() - startedAt) / 1_000_000);
             ocrWriter.finish(task, asset.getId(), token,
                 parsed.lines().isEmpty() ? TaskAsset.OCR_EMPTY : TaskAsset.OCR_DONE,
-                parsed.lines().isEmpty() ? null : parsed.content(), null);
+                parsed.lines().isEmpty() ? null : String.join("\n", parsed.lines()), null);
         }
         // 部分成功也先展示；失败任务不得发布不完整的“没有问题”报告。
         textWriter.refreshImages(task);
-        return allDone ? OcrOutcome.DONE : OcrOutcome.RETRY;
+        return OcrScan.of(allDone ? OcrOutcome.DONE : OcrOutcome.RETRY);
+    }
+
+    /** 本地预检类拒绝（尺寸/格式/权限）：同一张图重试无用，直接判终态 */
+    private static boolean isPermanentOcrInputError(ResultCode code) {
+        return code == ResultCode.UNPROCESSABLE || code == ResultCode.FORBIDDEN
+            || code == ResultCode.BAD_REQUEST;
     }
 
     /** 纯图片任务的收尾：OCR 文本就绪后直接分析并发布。 */

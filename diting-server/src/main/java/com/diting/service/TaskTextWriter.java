@@ -8,10 +8,12 @@ import com.diting.entity.Sentence;
 import com.diting.mapper.RecognitionTaskMapper;
 import com.diting.mapper.SentenceMapper;
 import com.diting.mapper.TaskAssetMapper;
-import com.diting.service.ocr.OcrParser;
 import com.diting.service.tingwu.TranscriptionParser;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.util.Arrays;
+import java.util.List;
 
 /** 独立事务 Bean：禁止同类自调用绕过事务；所有文本写入与删除共用任务行锁。 */
 @Service
@@ -71,8 +73,10 @@ public class TaskTextWriter {
         for (var asset : assets.selectByTask(taskId)) {
             if (!asset.isImage() || !"DONE".equals(asset.getOcrStatus())
                 || asset.getOcrText() == null || asset.getOcrText().isBlank()) continue;
-            // 存量结果损坏不能静默发布部分报告；抛异常整体回滚，留待修复/重试。
-            for (String line : OcrParser.parse(asset.getOcrText()).lines()) {
+            // ocr_text 是**归一化后的行文本**（管线按 '\n' 拼接）：同一口径切行即可重建句子。
+            // 这里曾经把它当 RecognizeGeneral 的 Data JSON 二次解析，而管线存的是纯文本，
+            // 于是真实链路上必然抛解析异常——图片句子永远重建不出来，口径已统一，别再改回 JSON。
+            for (String line : splitOcrLines(asset.getOcrText())) {
                 if (line == null || line.isBlank()) continue;
                 Sentence row = new Sentence();
                 row.setTaskId(taskId);
@@ -85,5 +89,13 @@ public class TaskTextWriter {
                 sentences.insert(row);
             }
         }
+    }
+
+    /** ocr_text 的切行口径（与 TaskPipelineService 落库时一致）：'\n' 分隔、去首尾空白、丢掉空行 */
+    static List<String> splitOcrLines(String text) {
+        return Arrays.stream(text.split("\\r\\n|\\r|\\n"))
+            .map(String::trim)
+            .filter(line -> !line.isEmpty())
+            .toList();
     }
 }

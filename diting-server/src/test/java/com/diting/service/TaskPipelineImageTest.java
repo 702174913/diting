@@ -1,6 +1,8 @@
 package com.diting.service;
 
+import com.diting.common.BizException;
 import com.diting.common.MediaKind;
+import com.diting.common.ResultCode;
 import com.diting.common.TaskStatus;
 import com.diting.config.DitingProperties;
 import com.diting.entity.RecognitionTask;
@@ -9,6 +11,7 @@ import com.diting.entity.TaskAsset;
 import com.diting.mapper.RecognitionTaskMapper;
 import com.diting.mapper.SentenceMapper;
 import com.diting.mapper.TaskAssetMapper;
+import com.diting.service.ocr.OcrApiException;
 import com.diting.service.ocr.OcrParser;
 import com.diting.service.ocr.StubOcrApi;
 import com.diting.service.report.ReportService;
@@ -29,6 +32,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -240,6 +244,97 @@ class TaskPipelineImageTest {
             eq(TaskPipelineService.ERR_OCR_FAILED), any(), any());
         verify(ocrService, never()).recognize(any());
         verify(reportService, never()).analyzeWithoutRoles(any());
+    }
+
+    @Test
+    @DisplayName("云端明确拒绝（未开通/无权限）：当次即置终态，不再拿同一张图重复付费重试")
+    void ocrCloudRejectionFailsFast() {
+        RecognitionTask task = imageTask(216L, TaskStatus.TRANSCRIBING);
+        when(taskMapper.selectDue(anyInt())).thenReturn(List.of(task));
+        TaskAsset asset = imageAsset(16L, "images/1/not-open.jpg");
+        when(taskAssetMapper.selectImagesToOcr(216L)).thenReturn(List.of(asset));
+        when(objectStorage.read(asset.getObjectKey())).thenReturn(jpeg());
+        when(ocrService.recognize(any())).thenThrow(
+            OcrApiException.ofCode("ocrServiceNotOpen", "You have not activated the OCR service."));
+
+        pipeline.tick();
+
+        // 官方错误码留在资产行上（以前只落常量 INTERNAL_ERROR，分不清没开通还是图坏了）
+        verify(taskAssetMapper).abandonOcr(eq(16L), eq(216L), anyString(), eq(3), eq("ocrServiceNotOpen"));
+        verify(taskAssetMapper, never()).finishOcr(eq(16L), eq(216L), anyString(), eq("FAILED"), any(), any());
+        ArgumentCaptor<String> status = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> error = ArgumentCaptor.forClass(String.class);
+        verify(taskMapper).advance(eq(216L), anyLong(), status.capture(), any(), error.capture(), any(), any());
+        assertThat(status.getValue()).isEqualTo(TaskStatus.FAILED.name());
+        assertThat(error.getValue()).isEqualTo(TaskPipelineService.ERR_OCR_REJECTED);
+        verify(reportService, never()).analyzeWithoutRoles(any());
+    }
+
+    @Test
+    @DisplayName("限流等可重试失败：错误码照样落库，任务继续重试")
+    void throttledOcrKeepsCodeAndRetries() {
+        RecognitionTask task = imageTask(217L, TaskStatus.TRANSCRIBING);
+        when(taskMapper.selectDue(anyInt())).thenReturn(List.of(task));
+        TaskAsset asset = imageAsset(17L, "images/1/throttled.jpg");
+        when(taskAssetMapper.selectImagesToOcr(217L)).thenReturn(List.of(asset));
+        when(objectStorage.read(asset.getObjectKey())).thenReturn(jpeg());
+        when(ocrService.recognize(any())).thenThrow(
+            OcrApiException.ofCode("Throttling.User", "超过限流阈值"));
+
+        pipeline.tick();
+
+        verify(taskAssetMapper).finishOcr(eq(17L), eq(217L), anyString(), eq("FAILED"), any(), eq("Throttling.User"));
+        verify(taskAssetMapper, never()).abandonOcr(anyLong(), anyLong(), anyString(), anyInt(), any());
+        ArgumentCaptor<String> status = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> error = ArgumentCaptor.forClass(String.class);
+        verify(taskMapper).advance(eq(217L), anyLong(), status.capture(), any(), error.capture(), any(), any());
+        assertThat(status.getValue()).isEqualTo(TaskStatus.TRANSCRIBING.name());
+        assertThat(error.getValue()).isEqualTo(TaskPipelineService.ERR_OCR_FAILED);
+    }
+
+    @Test
+    @DisplayName("本地预检拒绝（尺寸/格式）：同样当次判死，不等次数用尽")
+    void ocrPrecheckRejectionFailsFast() {
+        RecognitionTask task = imageTask(218L, TaskStatus.TRANSCRIBING);
+        when(taskMapper.selectDue(anyInt())).thenReturn(List.of(task));
+        TaskAsset asset = imageAsset(18L, "images/1/too-big.jpg");
+        when(taskAssetMapper.selectImagesToOcr(218L)).thenReturn(List.of(asset));
+        when(objectStorage.read(asset.getObjectKey())).thenReturn(jpeg());
+        when(ocrService.recognize(any())).thenThrow(
+            new BizException(ResultCode.UNPROCESSABLE, "图片尺寸超出识别范围：长宽需大于 15 像素且小于 8192 像素"));
+
+        pipeline.tick();
+
+        verify(taskAssetMapper).abandonOcr(eq(18L), eq(218L), anyString(), eq(3), eq("UNPROCESSABLE"));
+        ArgumentCaptor<String> status = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> error = ArgumentCaptor.forClass(String.class);
+        verify(taskMapper).advance(eq(218L), anyLong(), status.capture(), any(), error.capture(), any(), any());
+        assertThat(status.getValue()).isEqualTo(TaskStatus.FAILED.name());
+        assertThat(error.getValue()).isEqualTo(TaskPipelineService.ERR_OCR_REJECTED);
+    }
+
+    @Test
+    @DisplayName("落库口径闭环：管线写的行文本能被 TaskTextWriter 重建出同样的句子（旧口径会抛解析异常）")
+    void storedOcrTextRebuildsTheSameSentences() {
+        RecognitionTask task = imageTask(219L, TaskStatus.TRANSCRIBING);
+        when(taskMapper.selectDue(anyInt())).thenReturn(List.of(task));
+        TaskAsset asset = imageAsset(19L, "images/1/roundtrip.jpg");
+        when(taskAssetMapper.selectImagesToOcr(219L)).thenReturn(List.of(asset));
+        when(objectStorage.read(asset.getObjectKey())).thenReturn(jpeg());
+        when(ocrService.recognize(any())).thenReturn(OcrParser.parse(StubOcrApi.STUB_DATA));
+        // 识别完的同轮就会重建图片句子（harness 的 finishOcr 桩会把文本写回同一行）
+        when(taskAssetMapper.selectByTask(219L)).thenReturn(List.of(asset));
+        when(sentenceMapper.selectMaxSequence(219L)).thenReturn(0);
+
+        pipeline.tick();
+
+        assertThat(asset.getOcrText()).isEqualTo("我保证能减免利息。\n请你今天把款还上。");
+        ArgumentCaptor<Sentence> rows = ArgumentCaptor.forClass(Sentence.class);
+        verify(sentenceMapper, times(2)).insert(rows.capture());
+        assertThat(rows.getAllValues()).extracting(Sentence::getText)
+            .containsExactly("我保证能减免利息。", "请你今天把款还上。");
+        assertThat(rows.getAllValues()).extracting(Sentence::getSourceAssetId).containsOnly(19L);
+        verify(taskMapper).advance(eq(219L), anyLong(), eq("PARSING"), any(), any(), any(), any());
     }
 
     @Test

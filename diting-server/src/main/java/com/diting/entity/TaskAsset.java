@@ -28,6 +28,13 @@ public class TaskAsset {
     public static final String OCR_DONE = "DONE";
     public static final String OCR_EMPTY = "EMPTY";
     public static final String OCR_FAILED = "FAILED";
+    /** 重试次数用尽或云端明确拒绝（重试无用）：不再自动重试，等人工处理 */
+    public static final String OCR_EXHAUSTED = "EXHAUSTED";
+
+    /** 失败原因标记：网络中断/超时等不确定失败（云端错误码则原样落库，便于运维定位） */
+    public static final String OCR_ERROR_UNCERTAIN = "OCR_UNCERTAIN";
+    /** 失败原因标记：对象存储里读不到原件 */
+    public static final String OCR_ERROR_OBJECT_MISSING = "OBJECT_MISSING";
 
     @TableId(type = IdType.AUTO)
     private Long id;
@@ -60,7 +67,7 @@ public class TaskAsset {
     /** OCR 汇总文本（content）；音频为空 */
     private String ocrText;
 
-    /** 失败原因（不含原文与凭据） */
+    /** 失败原因（不含原文与凭据；云端错误码如 ocrServiceNotOpen / noPermission 原样保留） */
     private String ocrError;
 
     private LocalDateTime createdAt;
