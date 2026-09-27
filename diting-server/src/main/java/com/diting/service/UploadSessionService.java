@@ -9,6 +9,7 @@ import com.diting.config.DitingProperties;
 import com.diting.entity.UploadSession;
 import com.diting.mapper.UploadSessionMapper;
 import com.diting.service.storage.AudioFormatSniffer;
+import com.diting.service.storage.ImageDimensionProbe;
 import com.diting.service.storage.ImageFormatSniffer;
 import com.diting.service.storage.ObjectStorage;
 import org.springframework.stereotype.Service;
@@ -166,7 +167,8 @@ public class UploadSessionService {
                 (image ? "图片" : "文件") + "超过大小上限（" + (maxSize / 1024 / 1024) + "MB）");
         }
 
-        byte[] head = objectStorage.readPrefix(session.getObjectKey(), SNIFF_BYTES);
+        byte[] head = objectStorage.readPrefix(session.getObjectKey(),
+            image ? ImageDimensionProbe.PROBE_BYTES : SNIFF_BYTES);
         String detected = image ? ImageFormatSniffer.sniff(head) : AudioFormatSniffer.sniff(head);
         if (detected == null) {
             throw new BizException(ResultCode.UNPROCESSABLE,
@@ -184,6 +186,19 @@ public class UploadSessionService {
         if (!detected.equals(declared)) {
             throw new BizException(ResultCode.UNPROCESSABLE,
                 "文件实际格式为 " + detected + "，与文件名后缀 " + declared + " 不一致");
+        }
+        if (image) {
+            // 尺寸预检（S16 补强）：官方 OCR 只受理 15–8192 像素、长宽比 <50；
+            // 超限的图云端只回 illegalImageSize，在这里拦下能省掉一次付费调用与一轮重试。
+            // 探测不出（前缀里没有尺寸字段）时不拦，交给云端判。
+            String reason = ImageDimensionProbe.outOfOcrRange(
+                ImageDimensionProbe.probe(head),
+                props.getMedia().getMinImagePixels(),
+                props.getMedia().getMaxImagePixels(),
+                props.getMedia().getMaxImageAspectRatio());
+            if (reason != null) {
+                throw new BizException(ResultCode.UNPROCESSABLE, reason);
+            }
         }
 
         session.setStatus(STATUS_VERIFIED);

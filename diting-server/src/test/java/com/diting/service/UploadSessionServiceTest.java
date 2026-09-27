@@ -89,6 +89,32 @@ class UploadSessionServiceTest {
         return content;
     }
 
+    /** 最小 PNG 头（含 IHDR 宽高）：尺寸预检只读文件头，不需要真实像素数据 */
+    private static byte[] png(int width, int height) {
+        byte[] b = new byte[24];
+        b[0] = (byte) 0x89;
+        b[1] = 'P';
+        b[2] = 'N';
+        b[3] = 'G';
+        b[4] = 0x0D;
+        b[5] = 0x0A;
+        b[6] = 0x1A;
+        b[7] = 0x0A;
+        b[12] = 'I';
+        b[13] = 'H';
+        b[14] = 'D';
+        b[15] = 'R';
+        b[16] = (byte) (width >>> 24);
+        b[17] = (byte) (width >>> 16);
+        b[18] = (byte) (width >>> 8);
+        b[19] = (byte) width;
+        b[20] = (byte) (height >>> 24);
+        b[21] = (byte) (height >>> 16);
+        b[22] = (byte) (height >>> 8);
+        b[23] = (byte) height;
+        return b;
+    }
+
     private UploadSessionService.SignResult sign(Long userId, String filename) {
         return service.sign(userId, filename, "v1", 1024L);
     }
@@ -216,6 +242,26 @@ class UploadSessionServiceTest {
         assertThat(session.getContentHash()).isNotBlank();
         // 重复 complete 幂等
         assertThat(service.complete(7L, 100L).getStatus()).isEqualTo(UploadSessionService.STATUS_VERIFIED);
+    }
+
+    @Test
+    @DisplayName("UPLOAD-07 图片尺寸超出 OCR 受理范围：complete 直接拒（省掉一次必然失败的付费调用）")
+    void oversizedImageRejectedAtComplete() {
+        sign(7L, "大图.png");
+        storage.putObject(sessions.get(100L).getObjectKey(), png(9000, 9000), "image/png");
+
+        assertThatThrownBy(() -> service.complete(7L, 100L))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("尺寸超出识别范围");
+    }
+
+    @Test
+    @DisplayName("UPLOAD-08 尺寸合规的图片正常通过校验")
+    void normalSizedImagePassesComplete() {
+        sign(7L, "图.png");
+        storage.putObject(sessions.get(100L).getObjectKey(), png(1200, 800), "image/png");
+
+        assertThat(service.complete(7L, 100L).getMediaFormat()).isEqualTo("png");
     }
 
     @Test

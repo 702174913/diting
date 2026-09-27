@@ -14,8 +14,8 @@ public interface OcrApi {
      *
      * @param image 图片二进制（官方限制 ≤10MB，调用方负责预检）
      * @return 官方响应里的 `Data` 字段：JSON 字符串，含 `content` 与 `prism_wordsInfo[]`
-     * @throws com.diting.common.BizException 确定失败（未配置/图片不合规等）
-     * @throws IllegalStateException           结果不确定（超时/网络中断），调用方可按次数上限重试
+     * @throws com.diting.common.BizException 本地预检失败（未配置/图片不合规等）
+     * @throws OcrApiException 云端失败：带官方错误码与「是否值得重试」；网络中断/超时也走它（无错误码）
      */
     String recognize(byte[] image);
 }

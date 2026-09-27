@@ -6,6 +6,7 @@ import com.diting.config.DitingProperties;
 import com.diting.service.ocr.NotConfiguredOcrApi;
 import com.diting.service.ocr.OcrApi;
 import com.diting.service.ocr.OcrParser;
+import com.diting.service.storage.ImageDimensionProbe;
 import com.diting.service.storage.ImageFormatSniffer;
 import org.springframework.stereotype.Service;
 
@@ -16,7 +17,7 @@ import java.util.List;
  *
  * 三条纪律：
  * - **不伪造**：未配置凭据时 503；识别不出文字时返回空行集合（上层判 EMPTY），不编文字；
- * - **预检在服务端**：大小与格式按官方受理范围复核，不信任客户端声明；
+ * - **预检在服务端**：大小、格式与**像素尺寸**按官方受理范围复核，不信任客户端声明；
  * - **原文不外泄**：异常只带错误码与原因，不把图片原文或整段响应写进日志。
  */
 @Service
@@ -60,6 +61,15 @@ public class OcrService {
         }
         if (!isConfigured()) {
             throw new BizException(ResultCode.NOT_CONFIGURED, "图片识别（OCR）未配置");
+        }
+        // 尺寸预检（S16 补强，官方 RecognizeGeneral「重要提示」）：长宽 15–8192 像素、长宽比 <50。
+        // 上传校验已经拦过一道，这里用**完整字节**再查一次：前缀里取不到尺寸的图（JPEG 的 SOFn 靠后、
+        // 截断的 TIFF）只能在这里拦住，避免一次必然失败、还会按次数上限重试的付费调用。
+        String sizeReason = ImageDimensionProbe.outOfOcrRange(ImageDimensionProbe.probe(image),
+            props.getMedia().getMinImagePixels(), props.getMedia().getMaxImagePixels(),
+            props.getMedia().getMaxImageAspectRatio());
+        if (sizeReason != null) {
+            throw new BizException(ResultCode.UNPROCESSABLE, sizeReason);
         }
         String data = ocrApi.recognize(image);
         OcrParser.ParsedOcr parsed = OcrParser.parse(data);
