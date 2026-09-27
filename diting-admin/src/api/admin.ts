@@ -127,6 +127,7 @@ export interface AssetItem {
   mediaFormat: string | null
   sizeBytes: number | null
   ocrStatus: string
+  ocrError: string | null
   purged: boolean
   url: string | null
   urlExpiresAt: string | null

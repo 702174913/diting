@@ -254,10 +254,11 @@ test('未知后台地址有受登录守卫保护的兜底', () => {
   assert.match(source, /path: '\/:pathMatch\(\.\*\)\*', redirect: '\/overview'/)
 })
 
-test('逐句转写只显示命中规则名，不展示规则关键词清单', () => {
+test('逐句转写以「命中规则：《名称》」展示，不显示规则关键词清单', () => {
   const { displaySentenceNote } = evaluate('lib/recordingNotes.ts')
-  assert.equal(displaySentenceNote('命中规则《威胁性后果或强制时限表述》：“让你待不下去”、“后果自负”'), '威胁性后果或强制时限表述')
-  assert.equal(displaySentenceNote('命中规则《联系无关第三人或透露欠款信息》： “告诉你妈”'), '联系无关第三人或透露欠款信息')
+  assert.equal(displaySentenceNote('命中规则《威胁性后果或强制时限表述》：“让你待不下去”、“后果自负”'), '命中规则：《威胁性后果或强制时限表述》')
+  assert.equal(displaySentenceNote('命中规则《联系无关第三人或透露欠款信息》： “告诉你妈”'), '命中规则：《联系无关第三人或透露欠款信息》')
+  assert.equal(displaySentenceNote('命中规则：《联系无关第三人或透露欠款信息》： “告诉你妈”'), '命中规则：《联系无关第三人或透露欠款信息》')
   assert.equal(displaySentenceNote('规则《其他》不适用'), '规则《其他》不适用')
   const source = fs.readFileSync(path.join(__dirname, '../src/views/recordings/index.vue'), 'utf8')
   assert.match(source, /\{\{ displaySentenceNote\(note\) \}\}/)
@@ -277,6 +278,20 @@ test('录音详情能直接试听原件：进页签自动签发一次，播放�
   assert.match(source, /onAudioError\(\) \{\n\s+audioError\.value = '这条链接已失效或录音读不出来/)
   // 非管理员拿不到原件，文案不能给人「点一下就能听」的错觉
   assert.match(source, /当前角色不能调取录音原件/)
+})
+
+test('录音详情图片直接显示缩略图，点击打开大图预览；过期可刷新链接', () => {
+  const filename = path.join(__dirname, '../src/views/recordings/index.vue')
+  const source = fs.readFileSync(filename, 'utf8')
+  const { descriptor, errors } = parse(source, { filename })
+  assert.equal(errors.length, 0)
+  const script = compileScript(descriptor, { id: 'recordings-images' })
+  assert.equal(compileTemplate({ source: descriptor.template.content, filename, id: 'recordings-images', compilerOptions: { bindingMetadata: script.bindings } }).errors.length, 0)
+  assert.match(source, /images\.value = list\.filter\(item => item\.kind === 'IMAGE'\)/)
+  assert.match(source, /<button[\s\S]*?v-if="asset\.url && !failedImages\.includes\(asset\.assetId\)"[\s\S]*?@click="previewAssetId = asset\.assetId"[\s\S]*?<img[\s\S]*?:src="asset\.url"/)
+  assert.match(source, /<Dialog v-model:open="previewOpen">[\s\S]*?<DialogTitle[\s\S]*?previewAsset\.filename[\s\S]*?<img[\s\S]*?:src="previewAsset\.url"/)
+  assert.match(source, /@click="loadImages\(detail\.id\)"/)
+  assert.match(source, /v-if="!imagesLoading && !imagesError && images\.length === 0"/)
 })
 
 test('后台导出与重判点击即有反馈：进行中提示同 id 换成结果或失败', () => {

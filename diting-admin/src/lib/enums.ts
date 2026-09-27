@@ -63,6 +63,7 @@ export const OCR_STATUS_TEXT: Record<string, string> = {
   DONE: '已识别',
   EMPTY: '未识别到文字',
   FAILED: '识别失败',
+  EXHAUSTED: '识别失败（已停止重试）',
   SKIPPED: '不需要识别',
 }
 
@@ -70,7 +71,39 @@ export const OCR_STATUS_VARIANT: Record<string, BadgeVariant> = {
   DONE: 'up',
   EMPTY: 'warn',
   FAILED: 'down',
+  EXHAUSTED: 'down',
   RUNNING: 'warn',
+}
+
+/**
+ * 图片 OCR 失败原因（服务端 task_assets.ocr_error）：
+ * 网络类是我们自己的标记，其余是**阿里云官方错误码**原样落库（核验日期 2026-09-27）。
+ * 只做展示映射：没映射到的错误码直接显示原码，不假装认识——运维需要原码去查阿里云文档。
+ */
+export const OCR_ERROR_TEXT: Record<string, string> = {
+  'ocrServiceNotOpen': '「通用文字识别」尚未开通（阿里云控制台 → 服务管理与开通）',
+  'OcrServiceExpired': 'OCR 服务已欠费过期',
+  'noPermission': '子账号/角色未授权（需 RAM 策略 AliyunOCRFullAccess）',
+  'invalidStsToken': 'STS Token 无效',
+  'MissingAccessKeyId': '缺少 AccessKeyId',
+  'illegalSignature': '签名错误',
+  'InvalidSignatureVerssion': '签名版本错误',
+  'unsupportedImageFormat': '图像内容错误或格式不支持',
+  'illegalImageSize': '图像尺寸不合法（长宽需在 15–8192 像素之间）',
+  'exceededImageContent': '图像超过 10MB',
+  'unmatchedImageType': '图像类型与接口不匹配',
+  'notSafeImageUrl': '图片内容未通过安全校验',
+  'deprecatedApi': '该接口已废弃',
+  'Throttling.User': '触发阿里云限流（稍后自动重试）',
+  'algorithmError': '阿里云识别服务异常（稍后自动重试）',
+  'AlgorithmTimeout': '算法服务不可用（稍后自动重试）',
+  'ServiceUnavailable': '阿里云服务错误（稍后自动重试）',
+  'ServiceTimeout': '阿里云后端超时（稍后自动重试）',
+  'imageTimeOut': '云端获取图片超时（稍后自动重试）',
+  'OCR_UNCERTAIN': '调用结果不确定（网络中断/超时，稍后自动重试）',
+  'OBJECT_MISSING': '对象存储里读不到原件',
+  'NOT_CONFIGURED': '服务端未配置 OCR 凭据',
+  'UNPROCESSABLE': '图片不符合识别要求（格式/尺寸）',
 }
 
 /** 导出作业状态 */

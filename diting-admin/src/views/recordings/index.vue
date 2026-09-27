@@ -60,6 +60,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   DELETION_STATUS_TEXT,
   MATCH_TYPE_TEXT,
+  OCR_ERROR_TEXT,
   OCR_STATUS_TEXT,
   REPORT_STATUS_TEXT,
   TASK_STATUS_TEXT,
@@ -88,6 +89,19 @@ const loading = ref(false)
 const detail = ref<AdminReportDetail | null>(null)
 const detailId = ref<number | null>(null)
 const images = ref<AssetItem[]>([])
+const imagesLoading = ref(false)
+const imagesError = ref(false)
+const failedImages = ref<number[]>([])
+const previewAssetId = ref<number | null>(null)
+const previewAsset = computed(() => images.value.find(item => item.assetId === previewAssetId.value) ?? null)
+const previewOpen = computed({
+  get: () => previewAsset.value !== null,
+  set: (open: boolean) => {
+    if (!open) {
+      previewAssetId.value = null
+    }
+  },
+})
 const audioUrl = ref('')
 const audioTtl = ref<number | null>(null)
 /** 播放器报错（链接过期/对象不可读）：不静默，配着「重新签发」一起给人看 */
@@ -151,6 +165,9 @@ async function loadDetail(id: number) {
   audioTtl.value = null
   audioError.value = ''
   images.value = []
+  imagesError.value = false
+  failedImages.value = []
+  previewAssetId.value = null
   activeTab.value = 'transcript'
   try {
     detail.value = await fetchRecordingDetail(token, id)
@@ -168,13 +185,32 @@ async function loadImages(id: number) {
   if (!token) {
     return
   }
+  imagesLoading.value = true
+  imagesError.value = false
   try {
     const list = await fetchRecordingAssets(token, id)
+    if (detailId.value !== id) {
+      return
+    }
     images.value = list.filter(item => item.kind === 'IMAGE')
+    failedImages.value = []
   }
   catch {
-    // 资产拉取失败不影响报告查看
-    images.value = []
+    // 资产拉取失败不影响报告查看，但要允许用户重试
+    if (detailId.value === id) {
+      imagesError.value = true
+    }
+  }
+  finally {
+    if (detailId.value === id) {
+      imagesLoading.value = false
+    }
+  }
+}
+
+function onImageError(assetId: number) {
+  if (!failedImages.value.includes(assetId)) {
+    failedImages.value.push(assetId)
   }
 }
 
@@ -197,6 +233,10 @@ watch(() => route.query.detail, (value) => {
     audioTtl.value = null
     audioError.value = ''
     images.value = []
+    imagesLoading.value = false
+    imagesError.value = false
+    failedImages.value = []
+    previewAssetId.value = null
     return
   }
   void loadDetail(id)
@@ -711,38 +751,61 @@ load()
           </TabsContent>
 
           <TabsContent value="assets" class="max-h-[45vh] overflow-y-auto">
-            <p class="mb-2 text-xs text-muted-foreground">
-              共 {{ images.length }} 张，已识别文字 {{ ocrDoneCount }} 张。地址由服务端签发，每次签发留痕。
+            <div class="mb-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <span>共 {{ images.length }} 张，已识别文字 {{ ocrDoneCount }} 张。地址由服务端签发，每次签发留痕。</span>
+              <Button variant="outline" size="sm" :disabled="imagesLoading" @click="loadImages(detail.id)">
+                <RefreshCwIcon data-icon="inline-start" />
+                {{ imagesLoading ? '获取中…' : '刷新图片链接' }}
+              </Button>
+            </div>
+            <p v-if="imagesError" class="mb-2 text-xs text-down">
+              图片加载失败，请刷新图片链接重试。
             </p>
-            <div class="flex flex-wrap gap-2">
+            <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
               <div
                 v-for="asset in images"
                 :key="asset.assetId"
-                class="w-40 rounded-md border border-border p-2"
+                class="min-w-0 rounded-md border border-border p-2"
               >
-                <a
-                  v-if="asset.url"
-                  :href="asset.url"
-                  target="_blank"
-                  rel="noopener"
-                  class="block truncate text-xs text-primary underline-offset-4 hover:underline"
+                <button
+                  v-if="asset.url && !failedImages.includes(asset.assetId)"
+                  type="button"
+                  class="flex aspect-square w-full items-center justify-center overflow-hidden rounded bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                  :aria-label="`预览图片 ${asset.filename}`"
+                  @click="previewAssetId = asset.assetId"
                 >
+                  <img
+                    :src="asset.url"
+                    :alt="asset.filename"
+                    class="size-full object-contain"
+                    loading="lazy"
+                    referrerpolicy="no-referrer"
+                    @error="onImageError(asset.assetId)"
+                  >
+                </button>
+                <div v-else class="flex aspect-square items-center justify-center rounded bg-muted px-2 text-center text-xs text-muted-foreground">
+                  {{ asset.url ? '预览失败，请刷新图片链接' : '图片已清理或过期' }}
+                </div>
+                <div class="mt-2 truncate text-xs" :title="asset.filename">
                   {{ asset.filename }}
-                </a>
-                <span v-else class="block truncate text-xs text-muted-foreground">
-                  {{ asset.filename }}（已清理）
-                </span>
+                </div>
                 <div class="mt-1 text-[10px] text-muted-foreground">
                   OCR：{{ labelOf(OCR_STATUS_TEXT, asset.ocrStatus) }}
+                </div>
+                <div v-if="asset.ocrError" class="mt-0.5 text-[10px] text-down">
+                  {{ labelOf(OCR_ERROR_TEXT, asset.ocrError) }}
                 </div>
               </div>
             </div>
             <EmptyState
-              v-if="images.length === 0"
+              v-if="!imagesLoading && !imagesError && images.length === 0"
               title="没有图片资产"
               description="这条记录只有音频，或图片已过保留期。"
               :icon="ImageIcon"
             />
+            <p v-if="imagesLoading && images.length === 0" class="text-xs text-muted-foreground">
+              正在获取图片…
+            </p>
           </TabsContent>
 
           <TabsContent value="origin" class="max-h-[45vh] overflow-y-auto">
@@ -814,6 +877,28 @@ load()
             关闭
           </Button>
         </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog v-model:open="previewOpen">
+      <DialogContent v-if="previewAsset" class="sm:max-w-5xl">
+        <DialogHeader>
+          <DialogTitle class="break-all">
+            {{ previewAsset.filename }}
+          </DialogTitle>
+          <DialogDescription>图片预览 · 链接短期有效，失效后可返回图片页签刷新。</DialogDescription>
+        </DialogHeader>
+        <img
+          v-if="previewAsset.url && !failedImages.includes(previewAsset.assetId)"
+          :src="previewAsset.url"
+          :alt="previewAsset.filename"
+          class="max-h-[75vh] w-full object-contain"
+          referrerpolicy="no-referrer"
+          @error="onImageError(previewAsset.assetId)"
+        >
+        <p v-else class="text-sm text-muted-foreground">
+          图片无法预览，请关闭弹窗并刷新图片链接。
+        </p>
       </DialogContent>
     </Dialog>
 
