@@ -53,7 +53,10 @@ export interface RequestOptions {
  * 写死会让「路径不等」恒为真，并把失效会话整页跳到域名根的 /login
  * （那里是别的站点或 404）。用构建时的 base 拼，改部署路径不用再动这里。
  */
-const LOGIN_PATH = `${import.meta.env.BASE_URL}login`
+const BASE_PATH = import.meta.env.BASE_URL || '/'
+// BASE_URL 约定以 / 结尾（'/' 或 '/admin/'）；万一给成不带的，也要补上，
+// 否则会拼出 'adminlogin' 这种既不是绝对路径、也不是有效相对路径的东西。
+const LOGIN_PATH = `${BASE_PATH.endsWith('/') ? BASE_PATH : `${BASE_PATH}/`}login`
 
 /** 会话失效或实时角色复核拒绝时清理登录态；整页跳转同时清掉旧角色和组件内存。 */
 function handleUnauthorized() {
