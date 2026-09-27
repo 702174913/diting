@@ -161,7 +161,9 @@ watch(() => props.modelValue, syncFromModel)
         清格式
       </Button>
     </div>
-    <div v-if="linkError && !linkOpen" class="px-5 py-2 text-sm text-destructive" role="alert">{{ linkError }}</div>
+    <div v-if="linkError && !linkOpen" class="px-5 py-2 text-sm text-destructive" role="alert">
+      {{ linkError }}
+    </div>
     <div
       ref="editor"
       class="agreement-editor min-h-[320px] max-h-[560px] overflow-y-auto px-5 py-4 text-[14px] leading-[1.9] focus:outline-none"
@@ -180,14 +182,22 @@ watch(() => props.modelValue, syncFromModel)
         <form class="flex flex-col gap-4" @submit.prevent="applyLink">
           <FieldGroup>
             <Field :data-invalid="Boolean(linkError)">
-              <FieldLabel for="agreement-link">链接地址</FieldLabel>
+              <FieldLabel for="agreement-link">
+                链接地址
+              </FieldLabel>
               <Input id="agreement-link" v-model="linkUrl" type="url" :aria-invalid="Boolean(linkError)" />
-              <FieldDescription v-if="linkError" role="alert">{{ linkError }}</FieldDescription>
+              <FieldDescription v-if="linkError" role="alert">
+                {{ linkError }}
+              </FieldDescription>
             </Field>
           </FieldGroup>
           <DialogFooter>
-            <Button type="button" variant="outline" @click="linkOpen = false">取消</Button>
-            <Button type="submit">插入链接</Button>
+            <Button type="button" variant="outline" @click="linkOpen = false">
+              取消
+            </Button>
+            <Button type="submit">
+              插入链接
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>

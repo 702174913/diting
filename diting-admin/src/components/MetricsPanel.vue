@@ -60,8 +60,10 @@ const breakdown = ref<Breakdown[]>([])
 const error = ref('')
 const loading = ref(false)
 
-/** 涨是坏消息的指标：失败、耗时、积压类。
- *  统计面收敛为总览看板后，只保留总览真的会出现的指标键；其余页面的键随页面一起下了线。 */
+/**
+ * 涨是坏消息的指标：失败、耗时、积压类。
+ *  统计面收敛为总览看板后，只保留总览真的会出现的指标键；其余页面的键随页面一起下了线。
+ */
 const LOWER_IS_BETTER = new Set([
   'avgDuration',
   'failedTasks',
@@ -70,9 +72,11 @@ const LOWER_IS_BETTER = new Set([
   'queueNow',
 ])
 
-/** 涨跌不代表好坏的指标：版本号、计数类、审计事件、风险计数等。
+/**
+ * 涨跌不代表好坏的指标：版本号、计数类、审计事件、风险计数等。
  *  当前总览的 12 个指标都有明确好坏方向，所以这里为空集；将来接入中性指标时在此登记，
- *  判断逻辑（changeClass/changeTitle）保持不变。 */
+ *  判断逻辑（changeClass/changeTitle）保持不变。
+ */
 const DIRECTION_NEUTRAL = new Set<string>([])
 
 interface Change {
@@ -433,7 +437,9 @@ defineExpose({ load })
     </div>
 
     <EmptyState v-if="!loading && error" title="指标加载失败" :description="error">
-      <Button variant="outline" @click="load">重新加载</Button>
+      <Button variant="outline" @click="load">
+        重新加载
+      </Button>
     </EmptyState>
     <EmptyState
       v-if="!loading && !hasData && !error"

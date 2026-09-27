@@ -98,7 +98,9 @@ watch(open, (visible) => {
               <TableHead>名称</TableHead>
               <TableHead>分组</TableHead>
               <TableHead>类型</TableHead>
-              <TableHead v-if="ROLE_TARGETING_ENABLED">角色</TableHead>
+              <TableHead v-if="ROLE_TARGETING_ENABLED">
+                角色
+              </TableHead>
               <TableHead>扣分</TableHead>
               <TableHead>关键词</TableHead>
               <TableHead>时间</TableHead>
@@ -132,7 +134,9 @@ watch(open, (visible) => {
                   {{ item.groupName ?? '—' }}
                 </TableCell>
                 <TableCell>{{ TYPE_LABELS[item.matchType] ?? item.matchType }}</TableCell>
-                <TableCell v-if="ROLE_TARGETING_ENABLED">{{ ROLE_LABELS[item.roleScope] ?? item.roleScope }}</TableCell>
+                <TableCell v-if="ROLE_TARGETING_ENABLED">
+                  {{ ROLE_LABELS[item.roleScope] ?? item.roleScope }}
+                </TableCell>
                 <TableCell>{{ item.deduct }}</TableCell>
                 <!-- 关键词列允许换行：TableCell 默认 nowrap，长列表会把「时间」列挤出可视区 -->
                 <TableCell class="max-w-[16rem] whitespace-normal">
