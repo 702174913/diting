@@ -37,6 +37,15 @@ public class DitingProperties {
             new ArrayList<>(List.of("jpg", "jpeg", "png", "webp", "bmp", "gif", "tiff", "tif"));
         /** 单张图片大小上限（字节）：官方文档写「二进制不超过 10MB」 */
         private long maxImageBytes = 10L * 1024 * 1024;
+        /**
+         * OCR 尺寸下限（像素）：官方 RecognizeGeneral「重要提示」要求长宽**大于 15 像素**
+         * （错误码表里 illegalImageSize 写作 5 像素，取更严的那个，超限图一定被云端拒）。
+         */
+        private int minImagePixels = 15;
+        /** OCR 尺寸上限（像素）：官方要求长宽**小于 8192 像素** */
+        private int maxImagePixels = 8192;
+        /** OCR 长宽比上限：官方要求**小于 50**（<=0 表示不校验） */
+        private int maxImageAspectRatio = 50;
         /** 一次提交最多几张图片（用户需求：6 张） */
         private int maxImagesPerTask = 6;
         /** 预签名有效期（分钟） */
@@ -74,8 +83,9 @@ public class DitingProperties {
         private int retryBackoffSeconds = 30;
         /** 调度间隔（毫秒） */
         private long tickIntervalMs = 3000;
-        /** 中文字体路径；留空表示未配置（导出不可用） */
-        private String fontPath = "/System/Library/Fonts/Supplemental/Arial Unicode.ttf";
+        /** 中文字体：默认用 jar 内资源（classpath:fonts/NotoSansSC-Regular.ttf，OFL 授权）；
+         *  可用环境变量 DITING_EXPORT_FONT_PATH 覆盖成服务器上的文件路径 */
+        private String fontPath = "classpath:fonts/NotoSansSC-Regular.ttf";
     }
 
     /** 保留期与清理（开发文档 §9、§13）：原件 30 天，文本/审计期限另议 */
@@ -155,13 +165,20 @@ public class DitingProperties {
          * 文字识别（S16）：复用 AccessKey，但属独立产品——
          * 需单独开通「通用文字识别」并授予 RAM 策略 AliyunOCRFullAccess。
          */
-        @Data
-        public static class Ocr {
-            /** auto（按凭据判断）/ stub（仅测试用桩客户端） */
-            private String type = "auto";
-            /** 服务接入点；默认杭州，跨地域时在配置里覆盖 */
-            private String endpoint = "ocr-api.cn-hangzhou.aliyuncs.com";
-        }
+    @Data
+    public static class Ocr {
+        /** auto（按凭据判断）/ stub（仅测试用桩客户端） */
+        private String type = "auto";
+        /** 服务接入点；默认杭州，跨地域时在配置里覆盖 */
+        private String endpoint = "ocr-api.cn-hangzhou.aliyuncs.com";
+        /** 用哪个接口：alltext（统一识别 RecognizeAllText，默认）/ general（通用文字识别 RecognizeGeneral，回滚用） */
+        private String api = "alltext";
+        /**
+         * alltext 的 Type（官方**必填单选**）：General=通用文字识别基础版（默认）。
+         * 换 Advanced（高精版）要同时核对官方参数表（可否开坐标/成行/表格）与计费。
+         */
+        private String imageType = "General";
+    }
 
     @Data
     public static class Tingwu {

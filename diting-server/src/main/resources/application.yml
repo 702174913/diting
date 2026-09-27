@@ -28,7 +28,9 @@ diting:
   # 多个用逗号分隔；填 * 表示放行任意来源。本项目认证走 Authorization: Bearer（不是 Cookie），
   # 跨站请求无法自动带上凭据，所以即便放开也不会被冒用身份，但仍建议按域名收敛。
   cors:
-    allowed-origin-patterns: ${DITING_CORS_ORIGINS:http://localhost:[*],http://127.0.0.1:[*]}
+    # 折行只为满足行宽检查：折叠标量解析出来的值与单行写法完全一致（已用 YAML 解析核实）
+    allowed-origin-patterns: >-
+      ${DITING_CORS_ORIGINS:http://localhost:[*],http://127.0.0.1:[*]}
   jwt:
     # 密钥只走环境变量（DITING_JWT_SECRET）：泄露即可伪造任意身份域 token
     secret: ${DITING_JWT_SECRET}
@@ -47,6 +49,11 @@ diting:
     # 图片（S16）：格式与上限对齐阿里云 OCR 受理范围（HEIC 不在其中）
     allowed-image-formats: jpg,jpeg,png,webp,bmp,gif,tiff,tif
     max-image-bytes: 10485760
+    # OCR 尺寸范围（RecognizeGeneral 重要提示）：长宽需大于 15 且小于 8192 像素、长宽比小于 50。
+    # 超限的图云端只回 illegalImageSize，上传校验与调用前各拦一次，省掉付费调用与重试。
+    min-image-pixels: 15
+    max-image-pixels: 8192
+    max-image-aspect-ratio: 50
     max-images-per-task: 6
     asset-url-ttl-minutes: 15
     sign-ttl-minutes: 15
@@ -71,8 +78,10 @@ diting:
     max-artifact-bytes: 67108864
     batch-size: 3
     tick-interval-ms: 3000
-    # 中文字体（需持有合法授权，如思源黑体/Noto Sans SC，OFL 授权）；文件缺失或不可读时导出返回 503 NOT_CONFIGURED
-    font-path: ${DITING_EXPORT_FONT_PATH:/System/Library/Fonts/Supplemental/Arial Unicode.ttf}
+    # 中文字体：默认用 jar 内资源（Noto Sans SC，OFL 授权，零配置，服务器不需要放文件）；
+    # 如需换成其他授权字体，用 DITING_EXPORT_FONT_PATH 指向服务器上的静态 TTF（不支持 OTF/CFF、TTC 与可变字体）
+    font-path: "${DITING_EXPORT_FONT_PATH:classpath:fonts/\
+      NotoSansSC-Regular.ttf}"
   # 后台作业：租约 + 退避 + 有限重试
   pipeline:
     enabled: true
@@ -113,12 +122,18 @@ diting:
       callback-rate-per-minute: 60
       # 对外基础地址（如 https://api.example.com），仅用于启动日志拼出管控台要填的地址
       public-base-url: ${DITING_PUBLIC_BASE_URL:}
-    # 图片 OCR（S16）：与听悟共用 AccessKey，但需单独开通「通用文字识别」
+    # 图片 OCR（S16）：与听悟共用 AccessKey，但属**独立产品**，需单独开通并授 RAM
     ocr:
       # auto（按凭据判断）/ stub（仅测试用桩客户端）
       type: auto
       # 服务接入点；默认杭州，跨地域时在配置里覆盖
       endpoint: ocr-api.cn-hangzhou.aliyuncs.com
+      # 用哪个接口：alltext（统一识别 RecognizeAllText，默认）/
+      # general（通用文字识别 RecognizeGeneral，回滚开关）
+      # alltext 需开通「OCR 统一识别」，general 需开通「通用文字识别」——开通项不同
+      api: alltext
+      # alltext 的 Type（官方必填单选，只收图片不收 PDF）：General 基础版 / Advanced 高精版（需另核参数与计费）
+      image-type: General
 
 logging:
   level:
