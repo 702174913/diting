@@ -1,0 +1,48 @@
+{
+  "name": "diting-admin",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "description": "谛听 · 催收录音质检（管理后台）",
+  "scripts": {
+    "test": "node --test tests/*.test.cjs",
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "NODE_OPTIONS=--max-old-space-size=8192 vue-tsc --noEmit",
+    "preview": "vite preview",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
+  },
+  "dependencies": {
+    "@lucide/vue": "^1.48.0",
+    "@tanstack/vue-table": "^8.21.3",
+    "@unovis/vue": "^1.7.0",
+    "@vee-validate/zod": "^4.15.1",
+    "@vueuse/core": "^15.0.0",
+    "axios": "^1.7.5",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "dompurify": "3.2.7",
+    "pinia": "^2.2.2",
+    "reka-ui": "^2.10.5",
+    "tailwind-merge": "^3.7.0",
+    "vee-validate": "^4.15.1",
+    "vue": "^3.4.38",
+    "vue-router": "^4.4.3",
+    "vue-sonner": "^2.0.9",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@antfu/eslint-config": "^2.27.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^26.6.2",
+    "@vitejs/plugin-vue": "^5.1.2",
+    "eslint": "^9.9.1",
+    "jsdom": "25.0.1",
+    "tailwindcss": "^4.3.3",
+    "tw-animate-css": "^1.4.0",
+    "typescript": "~5.5.4",
+    "vite": "^5.4.2",
+    "vue-tsc": "^2.0.29"
+  }
+}

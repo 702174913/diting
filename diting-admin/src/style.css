@@ -1,0 +1,162 @@
+
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700&display=swap');
+/*
+  ---break---
+*/
+/*
+  谛听 · 后台管理端 · 全局样式入口
+
+  设计原则：运营视图追求颗粒度，投资人视图追求可信度；
+  两者共用同一数据口径但呈现层隔离，个体数据在任何视图中均不可导出。
+
+  这里是本项目唯一的全局样式表（Tailwind v4 CSS-first + shadcn-vue 语义令牌）：
+  - 令牌层：把定稿配色（深色 + 金色 #c8a45c）写成 shadcn 的语义变量；
+  - 映射层：@theme inline 把令牌暴露成 Tailwind 工具类（bg-card / text-muted-foreground…）；
+  - 基础层：只有 base 里那点全局重置，其余一律用工具类表达。
+
+  关于明暗：本后台恒定深色，因此令牌只定义在 :root 一份，没有 .dark 覆盖块。
+  <html class="dark"> 的作用是让 shadcn 组件内部的 dark: 变体生效，不代表存在浅色主题。
+  字体走系统字体栈（PingFang SC 兜底中文），不引远程字体，避免外网依赖与字形缺口。
+*/
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  /* ---- 表面：旧定稿的 panel / panel2 / panel3 ---- */
+  --background: #0c1219;
+  --foreground: #e7edf4;
+  --card: #151e29;
+  --card-foreground: #e7edf4;
+  --popover: #1b2632;
+  --popover-foreground: #e7edf4;
+  --surface-2: #1b2632;
+  --surface-3: #223040;
+
+  /* ---- 主色：金色。前景取定稿按钮上的深棕 #1a1206 ---- */
+  --primary: #c8a45c;
+  --primary-foreground: #1a1206;
+  --gold: #c8a45c;
+  --gold-deep: #8e7340;
+
+  /* ---- 次级 / 弱化 / 悬停 ---- */
+  --secondary: #223040;
+  --secondary-foreground: #e7edf4;
+  --muted: #1b2632;
+  --muted-foreground: #6f7e8e;
+  --accent: #223040;
+  --accent-foreground: #e7edf4;
+
+  /* ---- 语义色：违规下降 / 达标上升 / 提醒 ---- */
+  --destructive: #d9604f;
+  --destructive-foreground: #f6ece6;
+  --down: #d9604f;
+  --up: #5d9b7e;
+  --warn: #d9a441;
+
+  /* ---- 描边 ---- */
+  --border: #25313f;
+  --line-strong: #33414f;
+  --input: #33414f;
+  --ring: #8e7340;
+
+  /* ---- 文本次级色（旧 --text2）---- */
+  --foreground-soft: #a2afbe;
+
+  /* ---- 数据可视化：序列色谱与语义色同源 ---- */
+  --chart-1: #c8a45c;
+  --chart-2: #5d9b7e;
+  --chart-3: #d9604f;
+  --chart-4: #d9a441;
+  --chart-5: #a2afbe;
+
+  /* ---- 侧栏（与顶栏同用 card 面）---- */
+  --sidebar: #151e29;
+  --sidebar-foreground: #e7edf4;
+  --sidebar-primary: #c8a45c;
+  --sidebar-primary-foreground: #1a1206;
+  --sidebar-accent: #223040;
+  --sidebar-accent-foreground: #e7edf4;
+  --sidebar-border: #25313f;
+  --sidebar-ring: #8e7340;
+
+  /* ---- 圆角：面板 10px / 输入 8px / 小标记 6px ---- */
+  --radius: 0.625rem;
+
+  /* ---- 字体栈：与定稿一致，走本地字体 ---- */
+  --font-family-sans: 'Noto Sans SC', 'PingFang SC', system-ui, -apple-system, sans-serif;
+  --font-family-serif: 'Noto Serif SC', Georgia, serif;
+  --font-family-mono: 'SF Mono', Menlo, Consolas, monospace;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* 谛听补充语义色（对应旧定稿里的 panel2/panel3/line2/gold2/text2/up/down/warn） */
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-line-strong: var(--line-strong);
+  --color-gold: var(--gold);
+  --color-gold-deep: var(--gold-deep);
+  --color-foreground-soft: var(--foreground-soft);
+  --color-up: var(--up);
+  --color-down: var(--down);
+  --color-warn: var(--warn);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --font-sans: var(--font-family-sans);
+  --font-serif: var(--font-family-serif);
+  --font-mono: var(--font-family-mono);
+  /* 标题层级在定稿里就是衬线字（.page-head h1 与 .panel-h h3 都用 var(--serif)） */
+  --font-heading: var(--font-family-serif);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-family-sans);
+    font-size: 14px;
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
+}

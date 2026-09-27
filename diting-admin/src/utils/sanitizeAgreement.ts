@@ -1,0 +1,47 @@
+import DOMPurify from 'dompurify'
+
+/** 协议编辑器渲染/粘贴的独立防线；落库仍由服务端白名单重新清洗。 */
+export function sanitizeAgreementHtml(html: string): string {
+  return DOMPurify.sanitize(html, {
+    ALLOWED_TAGS: [
+      'a',
+      'p',
+      'div',
+      'span',
+      'br',
+      'b',
+      'strong',
+      'i',
+      'em',
+      'u',
+      's',
+      'h1',
+      'h2',
+      'h3',
+      'h4',
+      'h5',
+      'h6',
+      'blockquote',
+      'ul',
+      'ol',
+      'li',
+      'table',
+      'thead',
+      'tbody',
+      'tfoot',
+      'tr',
+      'th',
+      'td',
+      'caption',
+      'hr',
+      'pre',
+      'small',
+      'sup',
+      'sub',
+    ],
+    ALLOWED_ATTR: ['href', 'title'],
+    ALLOWED_URI_REGEXP: /^(?:https?:\/\/|#)/i,
+    ALLOW_DATA_ATTR: false,
+    ALLOW_ARIA_ATTR: false,
+  })
+}
