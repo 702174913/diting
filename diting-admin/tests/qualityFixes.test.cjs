@@ -18,7 +18,9 @@ function evaluate(relative, dependencies = {}, globals = {}) {
     assert.equal(compileTemplate({ source: descriptor.template.content, filename, id: relative, compilerOptions: { bindingMetadata: script.bindings } }).errors.length, 0)
     source = script.content
   }
-  source = source.replaceAll('import.meta.env.VITE_API_BASE', '\'\'')
+  // import.meta 在 vm 的 CJS 脚本里不可用：所有 import.meta.env.X 一律替换成空串
+  // （BASE_URL / VITE_API_BASE 在测试里都按「根路径、同源」取值）
+  source = source.replaceAll(/import\.meta\.env\.[A-Z0-9_]+/g, '\'\'')
   const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, esModuleInterop: true, target: ts.ScriptTarget.ES2020 } }).outputText
   const exports = {}
   vm.runInNewContext(output, {
@@ -150,7 +152,8 @@ test('看板失败可重试，全零序列有明确说明', async () => {
   await state.load()
   assert.equal(state.error.value, '')
   const source = fs.readFileSync(path.join(__dirname, '../src/components/MetricsPanel.vue'), 'utf8')
-  assert.match(source, /@click="load">重新加载/)
+  // 只断言「按钮绑 load 且文案是重新加载」，不锁死在模板里怎么换行（lint --fix 会重排）
+  assert.match(source, /@click="load"[\s\S]{0,80}重新加载/)
   assert.match(source, /本区间所有数据点均为 0/)
 })
 
