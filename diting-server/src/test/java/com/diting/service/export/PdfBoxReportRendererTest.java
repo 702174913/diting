@@ -10,7 +10,6 @@ import org.apache.pdfbox.cos.COSNumber;
 import org.apache.pdfbox.pdfparser.PDFStreamParser;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
-import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -27,7 +26,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 class PdfBoxReportRendererTest {
 
-    private static final String FONT = "/System/Library/Fonts/Supplemental/Arial Unicode.ttf";
+    /** 内置字体（随 jar 交付，OFL 授权）：测试不再依赖机器上的系统字体 */
+    private static final String FONT = "classpath:fonts/NotoSansSC-Regular.ttf";
     /** 页脚声明：需求指定文案，必须在 PDF 底部出现 */
     private static final List<String> FOOTERS = List.of(
         "本服务仅记录通话内容，不构成法律意见，",
@@ -97,8 +97,6 @@ class PdfBoxReportRendererTest {
     @Test
     @DisplayName("EXPORT-01 中文可读：正文、规则依据与页脚声明都被抽出")
     void rendersChinese() throws Exception {
-        Assumptions.assumeTrue(renderer().fontAvailable(), "本机缺中文字体，跳过");
-
         byte[] pdf = renderer().render(report(List.of(plainLine("[1] AGENT | 你好，我是某某公司的客服。"))));
 
         String text = extract(pdf);
@@ -109,8 +107,6 @@ class PdfBoxReportRendererTest {
     @Test
     @DisplayName("EXPORT-01 页脚声明完整落在 PDF 底部（需求指定文案）")
     void footerDisclaimerIsRendered() throws Exception {
-        Assumptions.assumeTrue(renderer().fontAvailable(), "本机缺中文字体，跳过");
-
         String text = extract(renderer().render(report(List.of(plainLine("[1] AGENT | 一句话。")))));
 
         for (String footer : FOOTERS) {
@@ -124,8 +120,6 @@ class PdfBoxReportRendererTest {
     @Test
     @DisplayName("版面标记不外泄：PDF 正文里不出现 #TITLE# / #SECTION# 这类内部标记")
     void templateMarkersNeverLeak() throws Exception {
-        Assumptions.assumeTrue(renderer().fontAvailable(), "本机缺中文字体，跳过");
-
         String text = extract(renderer().render(report(List.of(plainLine("[1] AGENT | 一句话。")))));
 
         assertThat(text).doesNotContain("#TITLE#").doesNotContain("#SECTION#")
@@ -135,8 +129,6 @@ class PdfBoxReportRendererTest {
     @Test
     @DisplayName("标红：命中片段用红色绘制，未命中内容不标红")
     void hitSpansAreRed() throws Exception {
-        Assumptions.assumeTrue(renderer().fontAvailable(), "本机缺中文字体，跳过");
-
         ReportPdfRenderer.Line hitLine = ReportPdfRenderer.Line.of(List.of(
             ReportPdfRenderer.Span.of("[1] AGENT | "),
             ReportPdfRenderer.Span.of("我"),
@@ -158,8 +150,6 @@ class PdfBoxReportRendererTest {
     @Test
     @DisplayName("EXPORT-01 长文自动分页，不裁切内容（含折行后的逐行分页）")
     void longReportPaginates() throws Exception {
-        Assumptions.assumeTrue(renderer().fontAvailable(), "本机缺中文字体，跳过");
-
         List<ReportPdfRenderer.Line> lines = new ArrayList<>();
         for (int i = 1; i <= 200; i++) {
             lines.add(plainLine("[%d] AGENT | 第 %d 句用于验证分页与折行，中文必须完整显示。".formatted(i, i)));
@@ -176,8 +166,6 @@ class PdfBoxReportRendererTest {
     @Test
     @DisplayName("EXPORT-03 注入内容按纯文本落盘：PDF 内不出现链接与脚本标记")
     void injectionIsPlainText() throws Exception {
-        Assumptions.assumeTrue(renderer().fontAvailable(), "本机缺中文字体，跳过");
-
         String payload = "<script>alert('x')</script><img src=\"http://evil.example.com/x.png\">";
         byte[] pdf = renderer().render(report(List.of(plainLine("[1] AGENT | " + payload))));
 
@@ -191,8 +179,6 @@ class PdfBoxReportRendererTest {
     @Test
     @DisplayName("EXPORT-06 脱敏文本等长掩码：渲染后仍是掩码形态，长度不变")
     void redactedTextStaysMasked() throws Exception {
-        Assumptions.assumeTrue(renderer().fontAvailable(), "本机缺中文字体，跳过");
-
         String original = "手机号是 13812345678，身份证 11010119900307721X。";
         String redacted = RedactionService.redact(original);
 

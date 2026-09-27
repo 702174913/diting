@@ -13,6 +13,7 @@ import java.awt.Color;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -36,31 +37,65 @@ public class PdfBoxReportRenderer implements ReportPdfRenderer {
     private static final float PAGE_WIDTH = PDRectangle.A4.getWidth();
     private static final float PAGE_HEIGHT = PDRectangle.A4.getHeight();
 
+    /** jar 内字体资源的路径前缀（默认字体 Noto Sans SC 随包交付，OFL 授权） */
+    private static final String CLASSPATH_PREFIX = "classpath:";
+
     /** 标红用正红：与界面高亮一致，打印成灰度也够深 */
     private static final Color HIT_COLOR = new Color(0xC0, 0x1B, 0x1B);
     private static final Color TEXT_COLOR = Color.BLACK;
 
+    private final String fontPath;
     private final File fontFile;
+    private final String classpathResource;
     private final float maxWidth;
 
+    /**
+     * 字体来源两种：
+     * - `classpath:fonts/xxx.ttf`（默认）：字体打进 jar，零配置，服务器不需要放文件；
+     * - 文件系统路径（`DITING_EXPORT_FONT_PATH` 覆盖时）：便于替换成其他授权字体。
+     */
     public PdfBoxReportRenderer(String fontPath) {
-        this.fontFile = new File(fontPath);
+        this.fontPath = fontPath == null ? "" : fontPath.trim();
+        if (this.fontPath.startsWith(CLASSPATH_PREFIX)) {
+            this.classpathResource = this.fontPath.substring(CLASSPATH_PREFIX.length());
+            this.fontFile = null;
+        }
+        else {
+            this.classpathResource = null;
+            this.fontFile = new File(this.fontPath);
+        }
         this.maxWidth = PAGE_WIDTH - MARGIN * 2;
     }
 
     public boolean fontAvailable() {
+        if (classpathResource != null) {
+            return PdfBoxReportRenderer.class.getResource("/" + classpathResource) != null;
+        }
         return fontFile.isFile() && fontFile.canRead();
+    }
+
+    /** 载入字体：jar 内资源（classpath:）或文件系统路径（子集嵌入，PDF 里只带用到的字形） */
+    private PDFont loadFont(PDDocument document) throws IOException {
+        if (classpathResource != null) {
+            try (InputStream in = PdfBoxReportRenderer.class.getResourceAsStream("/" + classpathResource)) {
+                if (in == null) {
+                    throw new IOException("jar 内字体不存在（classpath:" + classpathResource + "）");
+                }
+                return PDType0Font.load(document, in);
+            }
+        }
+        return PDType0Font.load(document, fontFile);
     }
 
     @Override
     public byte[] render(PdfReport report) {
         if (!fontAvailable()) {
             throw new BizException(ResultCode.NOT_CONFIGURED,
-                "导出字体未配置或不可读：请把 diting.export.font-path 指向持有合法授权的中文字体");
+                "导出字体不可用：" + fontPath + "（检查 diting.export.font-path 或 jar 内字体）");
         }
         try (PDDocument document = new PDDocument();
              ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-            PDFont font = PDType0Font.load(document, fontFile);
+            PDFont font = loadFont(document);
             List<Line> lines = flatten(report);
             PDPage page = newPage(document);
             PDPageContentStream stream = new PDPageContentStream(document, page);
