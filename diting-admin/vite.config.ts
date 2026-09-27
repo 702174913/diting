@@ -1,3 +1,4 @@
+import process from 'node:process'
 import { URL, fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
@@ -5,7 +6,7 @@ import tailwindcss from '@tailwindcss/vite'
 
 /**
  * 样式层已从 UnoCSS 迁到 Tailwind v4（CSS-first，令牌见 src/style.css）。
- * /api 代理指向本地 diting-server（默认 8080），迁移期间靠真实数据联调。
+ * /api 默认代理本地 diting-server（8080）；联调线上时可通过 API_PROXY_TARGET 临时覆盖。
  */
 export default defineConfig({
   // 后台部署在 /admin/ 子路径下（与 H5 的 /h5/ 区分）。
@@ -21,7 +22,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:8080',
+        target: process.env.API_PROXY_TARGET || 'http://127.0.0.1:8080',
         changeOrigin: true,
       },
     },
