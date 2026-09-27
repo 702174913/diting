@@ -35,6 +35,7 @@ function pageHarness(page, options = {}) {
     },
     '@/api/request': { ApiError },
     '@/api/upload': options.uploadApi || {},
+    '@/utils/audioDuration': { readAudioDurationMs: options.readAudioDurationMs || (async () => 60_000) },
     '@/utils/errors': { messageOf: () => '加载失败，请重试' },
     '@/utils/idempotency': { newIdempotencyKey: () => `upload-${Math.random()}` },
     '@/utils/choose': {
@@ -121,7 +122,7 @@ test('登记响应丢失后的重试复用同一幂等键和上传会话，即�
   const submissions = []
   const h = pageHarness('upload', {
     uploadApi: {
-      fetchQuota: async () => ({ remaining: ++quotaChecks === 1 ? 1 : 0 }),
+      fetchQuota: async () => ({ remaining: ++quotaChecks === 1 ? 1 : 0, maxRecordingMinutes: 10 }),
       signUpload: async () => ({ uploadId: ++signs }),
       uploadRaw: async () => { puts++ },
       completeUpload: async () => {
@@ -220,7 +221,7 @@ test('录音与图片二选一：切 tab 释放另一种并明确提示', async 
       releaseChosenFile: file => released.push(file.path),
       chooseAudioFile: async () => ({ name: 'call.m4a', path: 'blob:audio', size: 20 }),
     },
-    uploadApi: { fetchQuota: async () => ({ remaining: 1 }) },
+    uploadApi: { fetchQuota: async () => ({ remaining: 1, maxRecordingMinutes: 10 }) },
   })
   assert.equal(h.state.mode.value, 'audio')
 
@@ -244,6 +245,100 @@ test('录音与图片二选一：切 tab 释放另一种并明确提示', async 
   assert.equal(h.state.pendingFiles.value.length, 1)
 })
 
+test('选中超长录音立即拦截，保留之前的文件且不上传 OSS', async () => {
+  const released = []
+  const h = pageHarness('upload', {
+    chooseApi: {
+      chooseAudioFile: async () => ({ name: 'long.mp3', path: 'blob:long', size: 100 }),
+      releaseChosenFile: file => released.push(file.path),
+    },
+    readAudioDurationMs: async () => 600_001,
+    uploadApi: { fetchQuota: async () => ({ remaining: 1, maxRecordingMinutes: 10 }) },
+  })
+  h.state.pendingFiles.value = [{ name: 'old.mp3', path: 'blob:old', size: 100, durationMs: 10_000 }]
+  await h.state.chooseFile()
+  assert.equal(h.state.pendingFiles.value[0].name, 'old.mp3')
+  assert.deepEqual(released, ['blob:long'])
+  assert.match(h.toasts.at(-1).title, /超过 10 分钟/)
+})
+
+test('恰好达到上限可上传，提交任务时带上本地读取的声明时长', async () => {
+  const submissions = []
+  const h = pageHarness('upload', {
+    uploadApi: {
+      fetchQuota: async () => ({ remaining: 1, maxRecordingMinutes: 10 }),
+      signUpload: async () => ({ uploadId: 1 }),
+      uploadRaw: async () => {},
+      completeUpload: async () => ({ durationMs: null }),
+      submitTask: async (_ids, duration) => {
+        submissions.push(duration)
+        return { id: 88 }
+      },
+    },
+  })
+  h.state.pendingFiles.value = [{ name: 'call.mp3', path: 'blob:call', size: 100, durationMs: 600_000 }]
+  await h.state.confirmUpload()
+  assert.deepEqual(submissions, [600])
+})
+
+test('配置改变后正式签发前再次拦截超长录音，不发签名也不上传 OSS', async () => {
+  let signs = 0
+  let puts = 0
+  let quotaChecks = 0
+  const h = pageHarness('upload', {
+    chooseApi: { chooseAudioFile: async () => ({ name: 'call.mp3', path: 'blob:call', size: 100 }) },
+    readAudioDurationMs: async () => 90_000,
+    uploadApi: {
+      fetchQuota: async () => ({ remaining: 1, maxRecordingMinutes: ++quotaChecks === 1 ? 2 : 1 }),
+      signUpload: async () => {
+        signs++
+        return { uploadId: 1 }
+      },
+      uploadRaw: async () => { puts++ },
+    },
+  })
+  await h.state.chooseFile()
+  assert.equal(h.state.pendingFiles.value[0].durationMs, 90_000)
+  await h.state.confirmUpload()
+  assert.equal(signs, 0)
+  assert.equal(puts, 0)
+  assert.match(h.toasts.at(-1).title, /超过 1 分钟/)
+})
+
+test('时长无法读取或上限接口不可用时拒绝上传，不伪装为合格录音', async () => {
+  let signs = 0
+  const h = pageHarness('upload', {
+    readAudioDurationMs: async () => { throw new Error('无法读取录音时长，请换文件') },
+    uploadApi: {
+      fetchQuota: async () => ({ remaining: 1, maxRecordingMinutes: 10 }),
+      signUpload: async () => {
+        signs++
+        return { uploadId: 1 }
+      },
+    },
+  })
+  h.state.pendingFiles.value = [{ name: 'bad.amr', path: 'memory/bad', size: 123 }]
+  await h.state.confirmUpload()
+  assert.equal(signs, 0)
+  assert.match(h.toasts.at(-1).title, /无法读取录音时长/)
+
+  h.state.pendingFiles.value = [{ name: 'call.mp3', path: 'memory/call', size: 123, durationMs: 30_000 }]
+  h.state.maxMinutes.value = null
+  const offline = pageHarness('upload', {
+    uploadApi: {
+      fetchQuota: async () => { throw new Error('offline') },
+      signUpload: async () => {
+        signs++
+        return { uploadId: 1 }
+      },
+    },
+  })
+  offline.state.pendingFiles.value = h.state.pendingFiles.value
+  await offline.state.confirmUpload()
+  assert.equal(signs, 0)
+  assert.match(offline.toasts.at(-1).title, /无法获取录音时长上限/)
+})
+
 test('上传页不再内联进度：提交完只负责提示与跳转', async () => {
   const h = pageHarness('upload')
   await flush()
@@ -254,7 +349,7 @@ test('上传页不再内联进度：提交完只负责提示与跳转', async ()
 test('上传成功后先提示再跳到这条记录的处理页', async () => {
   const h = pageHarness('upload', {
     uploadApi: {
-      fetchQuota: async () => ({ remaining: 1 }),
+      fetchQuota: async () => ({ remaining: 1, maxRecordingMinutes: 10 }),
       signUpload: async () => ({ uploadId: 1 }),
       uploadRaw: async () => {},
       completeUpload: async () => ({ durationMs: 1000 }),
@@ -275,10 +370,10 @@ test('上传成功后先提示再跳到这条记录的处理页', async () => {
   h.hooks.onUnmounted()
 })
 
-test('提示期间被切走就不弹跳：待跳转定时器随页面隐藏撤回', async () => {
+test('提示期间被切走就不弹跳：待跳转的定时器随页面隐藏撤回', async () => {
   const h = pageHarness('upload', {
     uploadApi: {
-      fetchQuota: async () => ({ remaining: 1 }),
+      fetchQuota: async () => ({ remaining: 1, maxRecordingMinutes: 10 }),
       signUpload: async () => ({ uploadId: 1 }),
       uploadRaw: async () => {},
       completeUpload: async () => ({ durationMs: 1000 }),

@@ -8,6 +8,8 @@ export interface ChosenFile {
   path: string
   name: string
   size: number
+  /** 本地解析得到的录音时长；图片不需要 */
+  durationMs?: number
 }
 
 /**

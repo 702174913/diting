@@ -20,6 +20,7 @@ import {
   submitTask,
   uploadRaw,
 } from '@/api/upload'
+import { readAudioDurationMs } from '@/utils/audioDuration'
 import { messageOf } from '@/utils/errors'
 import { newIdempotencyKey } from '@/utils/idempotency'
 import { useUserStore } from '@/stores/user'
@@ -134,13 +135,17 @@ async function chooseFile() {
     }
     return
   }
-  if (!(await precheckQuota())) {
-    return
-  }
   // #endif
   // H5 文件选择器必须在点击事件的用户激活期内立即打开，不能先 await 网络预检。
+  let file: ChosenFile | null = null
+  busy.value = true
   try {
-    const file = await chooseAudioFile()
+    file = await chooseAudioFile()
+    uploadStage.value = '正在检查录音时长…'
+    if (!(await precheckQuota(true)) || !(await checkAudioLimit(file))) {
+      releaseChosenFile(file)
+      return
+    }
     if (audioSelected.value) {
       releaseChosenFile(audioSelected.value)
     }
@@ -148,9 +153,16 @@ async function chooseFile() {
     attempt.value = null
   }
   catch (error) {
+    if (file) {
+      releaseChosenFile(file)
+    }
     if (error instanceof Error && error.message !== '已取消选择' && error.message) {
       uni.showToast({ title: error.message, icon: 'none' })
     }
+  }
+  finally {
+    busy.value = false
+    uploadStage.value = ''
   }
 }
 
@@ -199,8 +211,8 @@ async function chooseImageFiles() {
   }
 }
 
-/** 额度预检：0 份时直接拦下，不让用户白传一遍（服务端仍会再校验一次） */
-async function precheckQuota() {
+/** 音频必须拿到服务端当前上限；图片沿用原额度预检的容错口径。 */
+async function precheckQuota(requireAudioLimit = false) {
   try {
     const quota = await fetchQuota(userStore.token)
     remaining.value = quota.remaining
@@ -209,11 +221,42 @@ async function precheckQuota() {
       uni.showToast({ title: '今天的免费份数用完了，明天再来', icon: 'none' })
       return false
     }
+    if (requireAudioLimit && (!Number.isFinite(quota.maxRecordingMinutes) || quota.maxRecordingMinutes <= 0)) {
+      throw new Error('无效的录音时长上限')
+    }
   }
   catch {
-    // 预检失败不阻塞（服务端仍会校验），继续选文件
+    if (requireAudioLimit) {
+      maxMinutes.value = null
+      uni.showToast({ title: '暂时无法获取录音时长上限，请稍后重试', icon: 'none' })
+      return false
+    }
+    // 图片预检失败不阻塞（服务端仍会校验）
   }
   return true
+}
+
+/** 选完文件以及正式签发前各检查一次；未知时长一律拒绝，不上传 OSS。 */
+async function checkAudioLimit(file: ChosenFile) {
+  try {
+    const duration = file.durationMs ?? await readAudioDurationMs(file)
+    if (!Number.isFinite(duration) || duration <= 0) {
+      throw new Error('无法读取录音时长，请换一个受支持的录音文件后重试')
+    }
+    file.durationMs = duration
+    if (maxMinutes.value === null) {
+      return false
+    }
+    if (duration > maxMinutes.value * 60_000) {
+      uni.showToast({ title: `录音超过 ${maxMinutes.value} 分钟上限，请换一段`, icon: 'none' })
+      return false
+    }
+    return true
+  }
+  catch (error) {
+    uni.showToast({ title: error instanceof Error ? error.message : '无法读取录音时长，请换文件', icon: 'none' })
+    return false
+  }
 }
 
 function removeFile(path: string) {
@@ -263,7 +306,14 @@ async function confirmUpload() {
     return
   }
   // 受理响应丢失后服务端可能已预占最后一份；恢复同一提交不能被额度预检拦住。
-  if (!attempt.value?.submitted && !(await precheckQuota())) {
+  if (!attempt.value?.submitted && !(await precheckQuota(mode.value === 'audio'))) {
+    sheetVisible.value = false
+    busy.value = false
+    return
+  }
+  if (mode.value === 'audio' && !attempt.value?.submitted
+    && audioSelected.value && !(await checkAudioLimit(audioSelected.value))) {
+    sheetVisible.value = false
     busy.value = false
     return
   }
@@ -275,6 +325,9 @@ async function confirmUpload() {
   uploadPercent.value = null
   try {
     // 逐个：签发 → 原始字节 PUT → complete 校验；任一失败整体中止（不登记半个任务）
+    if (mode.value === 'audio' && currentAttempt.declaredDuration === undefined && audioSelected.value?.durationMs) {
+      currentAttempt.declaredDuration = Math.ceil(audioSelected.value.durationMs / 1000)
+    }
     const uploadIds: number[] = []
     let index = 0
     for (const file of files) {
@@ -297,7 +350,7 @@ async function confirmUpload() {
         const done = await completeUpload(entry.sign.uploadId, token)
         entry.verified = true
         if (!isImage(file) && typeof done.durationMs === 'number' && done.durationMs > 0) {
-          currentAttempt.declaredDuration = Math.round(done.durationMs / 1000)
+          currentAttempt.declaredDuration = Math.ceil(done.durationMs / 1000)
         }
       }
       uploadIds.push(entry.sign.uploadId)
