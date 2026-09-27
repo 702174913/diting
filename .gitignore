@@ -1,0 +1,36 @@
+# ── 依赖与构建产物（可从源码重建，不进版本库）──
+node_modules/
+dist/
+build/
+target/
+*.class
+__pycache__/
+*.py[cod]
+.vite/
+.ruff_cache/
+.pytest_cache/
+
+# ── 敏感文件：真实密钥与数据库导出（本地保留，不进版本库）──
+# diting.env 明确写了「含真实密钥」；.env.* 为各端本地/生产配置
+diting.env
+.env
+.env.*
+# 从线上库导出的数据（含真实业务数据与口令哈希）
+*.dump
+.diting-backup/
+
+# ── 运行时数据 ──
+# pi 的会话与任务日志
+.pi/
+
+# ── 第三方克隆 ──
+# 自带 upstream 的仓库；嵌套仓库在父仓库里只会变成一个 gitlink 条目
+.agents/
+
+# ── 被并入父仓库的旧仓库 ──
+# diting-admin 并入前的 29 条提交历史仍完整保留在这里（需要时 mv 回 .git 即可）
+.git.bak/
+
+# ── 系统与编辑器 ──
+.DS_Store
+*.log
