@@ -1,0 +1,108 @@
+{
+  "pages": [
+    {
+      "path": "pages/home/index",
+      "style": {
+        "navigationBarTitleText": "谛听",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/login/index",
+      "style": {
+        "navigationBarTitleText": "登录谛听",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/upload/index",
+      "style": {
+        "navigationBarTitleText": "上传录音",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/history/index",
+      "style": {
+        "navigationBarTitleText": "听过的话",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/about/index",
+      "style": {
+        "navigationBarTitleText": "安心",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/progress/index",
+      "style": {
+        "navigationBarTitleText": "正在聆听",
+        "navigationBarBackgroundColor": "#FBF6F0",
+        "navigationBarTextStyle": "black"
+      }
+    },
+    {
+      "path": "pages/report/detail",
+      "style": {
+        "navigationBarTitleText": "质检记录",
+        "navigationBarBackgroundColor": "#FBF6F0",
+        "navigationBarTextStyle": "black"
+      }
+    },
+    {
+      "path": "pages/privacy/index",
+      "style": {
+        "navigationBarTitleText": "隐私与数据",
+        "navigationBarBackgroundColor": "#FBF6F0",
+        "navigationBarTextStyle": "black"
+      }
+    },
+    {
+      "path": "pages/agreement/index",
+      "style": {
+        "navigationBarTitleText": "用户协议",
+        "navigationStyle": "custom"
+      }
+    }
+  ],
+  "tabBar": {
+    "color": "#948B80",
+    "selectedColor": "#C96434",
+    "backgroundColor": "#FBF6F0",
+    "borderStyle": "white",
+    "list": [
+      {
+        "pagePath": "pages/home/index",
+        "text": "今天",
+        "iconPath": "static/tabbar/home-off.png",
+        "selectedIconPath": "static/tabbar/home-on.png"
+      },
+      {
+        "pagePath": "pages/upload/index",
+        "text": "上传",
+        "iconPath": "static/tabbar/upload-off.png",
+        "selectedIconPath": "static/tabbar/upload-on.png"
+      },
+      {
+        "pagePath": "pages/history/index",
+        "text": "记录",
+        "iconPath": "static/tabbar/record-off.png",
+        "selectedIconPath": "static/tabbar/record-on.png"
+      },
+      {
+        "pagePath": "pages/about/index",
+        "text": "安心",
+        "iconPath": "static/tabbar/care-off.png",
+        "selectedIconPath": "static/tabbar/care-on.png"
+      }
+    ]
+  },
+  "globalStyle": {
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "谛听",
+    "navigationBarBackgroundColor": "#FBF6F0",
+    "backgroundColor": "#FBF6F0"
+  }
+}
