@@ -144,9 +144,19 @@ class UploadSessionServiceTest {
         // 预签名有效期由存储实现用真实时钟签发，这里断言配置的 TTL 被正确应用
         assertThat(result.presigned().expiresAt())
             .isBetween(Instant.now().plusSeconds(14 * 60), Instant.now().plusSeconds(16 * 60));
-        assertThat(result.cleanupAfter()).isEqualTo(LocalDateTime.ofInstant(NOW, ZoneId.of("Asia/Shanghai")).plusHours(24));
+        assertThat(result.cleanupAfter()).isEqualTo(sessions.get(100L).getSignedUntil().plusMinutes(1));
         assertThat(sessions.get(100L).getSignedUntil()).isNotNull();
         assertThat(sessions.get(100L).getStatus()).isEqualTo(UploadSessionService.STATUS_SIGNED);
+    }
+
+    @Test
+    void refreshExtendsCleanupDeadlinePastNewSignature() {
+        var signed = sign(7L, "a.m4a");
+        sessions.get(signed.uploadId()).setCleanupAfter(LocalDateTime.ofInstant(NOW, ZoneId.of("Asia/Shanghai")));
+
+        var refreshed = service.refresh(7L, signed.uploadId());
+
+        assertThat(refreshed.cleanupAfter()).isEqualTo(sessions.get(signed.uploadId()).getSignedUntil().plusMinutes(1));
     }
 
     @Test

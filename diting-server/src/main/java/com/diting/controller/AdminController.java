@@ -52,14 +52,8 @@ public class AdminController {
     @PostMapping("/login")
     public R<AdminLoginResult> login(@Validated @RequestBody AdminLoginRequest req,
                                      HttpServletRequest request) {
-        String ip = request.getHeader("X-Forwarded-For");
-        if (ip == null || ip.isBlank()) {
-            ip = request.getRemoteAddr();
-        }
-        else {
-            ip = ip.split(",")[0].trim();
-        }
-        return R.ok(adminUserService.login(req.username(), req.password(), ip));
+        return R.ok(adminUserService.login(req.username(), req.password(),
+            com.diting.config.ClientAddress.of(request)));
     }
 
     /** 账号变更留痕：绝不记录密码与哈希 */

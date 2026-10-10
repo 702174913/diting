@@ -45,17 +45,18 @@ public class ReportAnalysisService {
     private final ConfigService configService;
     private final TaskPipelineService pipeline;
     private final RecognitionTaskMapper taskMapper;
-    private final ObjectMapper json = new ObjectMapper();
+    private final ObjectMapper json;
 
     public ReportAnalysisService(ReportVersionMapper reportVersionMapper, ViolationMapper violationMapper,
                                  RuleMatchService engine, ConfigService configService,
-                                 TaskPipelineService pipeline, RecognitionTaskMapper taskMapper) {
+                                 TaskPipelineService pipeline, RecognitionTaskMapper taskMapper, ObjectMapper json) {
         this.reportVersionMapper = reportVersionMapper;
         this.violationMapper = violationMapper;
         this.engine = engine;
         this.configService = configService;
         this.pipeline = pipeline;
         this.taskMapper = taskMapper;
+        this.json = json;
     }
 
     /** 发布一个新版本：写报告版本 + 命中证据，发布后再推进任务状态 */

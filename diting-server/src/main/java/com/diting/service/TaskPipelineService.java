@@ -245,7 +245,8 @@ public class TaskPipelineService {
             OcrParser.ParsedOcr parsed;
             long startedAt = System.nanoTime();
             try {
-                byte[] bytes = objectStorage.read(asset.getObjectKey());
+                byte[] bytes = objectStorage.readLimited(asset.getObjectKey(),
+                    Math.toIntExact(props.getMedia().getMaxImageBytes()));
                 if (bytes == null) {
                     ocrWriter.finish(task, asset.getId(), token, TaskAsset.OCR_FAILED, null,
                         TaskAsset.OCR_ERROR_OBJECT_MISSING);
@@ -270,8 +271,8 @@ public class TaskPipelineService {
                     throw e;
                 }
                 String mark = String.valueOf(e.getResultCode().getSymbol());
-                ocrWriter.finish(task, asset.getId(), token, TaskAsset.OCR_FAILED, null, mark);
                 if (e.getResultCode() == ResultCode.NOT_CONFIGURED) {
+                    ocrWriter.finish(task, asset.getId(), token, TaskAsset.OCR_FAILED, null, mark);
                     return OcrScan.of(OcrOutcome.STOP);
                 }
                 if (isPermanentOcrInputError(e.getResultCode())) {
@@ -280,6 +281,7 @@ public class TaskPipelineService {
                     ocrWriter.abandon(task, asset.getId(), token, maxAttempts, mark);
                     return new OcrScan(OcrOutcome.REJECTED, mark);
                 }
+                ocrWriter.finish(task, asset.getId(), token, TaskAsset.OCR_FAILED, null, mark);
                 return OcrScan.of(OcrOutcome.RETRY);
             }
             catch (Exception e) {
@@ -437,26 +439,44 @@ public class TaskPipelineService {
 
     /** 下载并解析结果，按时间序落库；空音频判 INVALID，其余等角色确认 */
     private boolean parseAndPersist(RecognitionTask task) {
-        TingwuService.TaskInfo info = new TingwuService.TaskInfo(task.getTaskId(),
-            TingwuService.RemoteStatus.COMPLETED, resolveTranscriptionUrl(task), null);
         TranscriptionParser.ParsedTranscription parsed;
         try {
+            TingwuService.TaskInfo info = new TingwuService.TaskInfo(task.getTaskId(),
+                TingwuService.RemoteStatus.COMPLETED, resolveTranscriptionUrl(task), null);
             parsed = tingwuService.fetchTranscription(info);
         }
         catch (BizException e) {
-            // 结果地址失效、体积/来源不合规、结构异常：停在 PARSING 并记录，等下一次重试
-            return backoff(task, TaskStatus.PARSING, ERR_PARSE_FAILED, e.getMessage());
+            return failParsing(task, e.getMessage());
+        }
+        catch (RuntimeException e) {
+            log.warn("任务 {} 获取转写结果失败：{}", task.getId(), e.getClass().getSimpleName());
+            return failParsing(task, "获取转写结果失败，稍后重试");
         }
         if (parsed.isEmpty() && !MediaKind.hasImage(task.getMediaKind())) {
             return backoff(task, TaskStatus.INVALID, ERR_NO_TEXT, "音频中没有可用语音");
         }
         textWriter.saveAudio(task, parsed);
         backfillDuration(task, parsed.durationMs());
-        // 混合记录：音频句子落库后再把图片 OCR 的结果并进来，然后才等角色确认
+        // 先落库合法状态，再进入报告发布事务；保留历史混合任务的图片处理能力。
+        if (TaskStatus.TRANSCRIBING.name().equals(task.getStatus())
+            && !backoff(task, TaskStatus.PARSING, null, null)) {
+            return false;
+        }
+        // 混合记录：音频句子落库后再把图片 OCR 的结果并进来。
         if (MediaKind.hasImage(task.getMediaKind())) {
             return finishOcr(task, TaskStatus.PARSING, !parsed.isEmpty());
         }
         return publishWithoutRoles(task);
+    }
+
+    /** 只计结果解析失败，不把正常远端轮询/报告发布次数误算进重试上限。 */
+    private boolean failParsing(RecognitionTask task, String message) {
+        int max = Math.max(1, props.getPipeline().getMaxAttempts());
+        boolean exhausted = (task.getParseFailures() == null ? 0 : task.getParseFailures()) + 1 >= max;
+        return taskMapper.failParsing(task.getId(), task.getVersion(), exhausted ? "FAILED" : "PARSING",
+            ERR_PARSE_FAILED, exhausted ? "转写结果多次无法解析，已停止重试，请联系管理员处理" : message,
+            exhausted ? null : BusinessTime.now().plusSeconds(props.getPipeline().getBackoffSeconds()),
+            exhausted ? BusinessTime.now() : null) == 1;
     }
 
     /**

@@ -1,8 +1,0 @@
-{
-  "backend": "chrome",
-  "thresholds": {
-    "profile": "hosted",
-    "goalDone": 0.6,
-    "goalDoneFinal": 0.55
-  }
-}

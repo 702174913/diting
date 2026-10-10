@@ -56,6 +56,9 @@ public class RecognitionTask {
     /** 已尝试次数 */
     private Integer attemptCount;
 
+    /** 结果下载/解析的失败次数；不包含正常远端轮询。 */
+    private Integer parseFailures;
+
     /** 作业租约到期时间 */
     private LocalDateTime leaseUntil;
 

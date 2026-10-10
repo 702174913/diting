@@ -78,7 +78,8 @@ class RuleImportServiceTest {
             .max(Comparator.comparingInt(AuditRuleVersion::getVersion))
             .orElse(null));
 
-        RuleService real = new RuleService(ruleMapper, versionMapper, mock(RuleSetMapper.class));
+        RuleService real = new RuleService(ruleMapper, versionMapper, mock(RuleSetMapper.class),
+            new com.fasterxml.jackson.databind.ObjectMapper());
         RuleService spy = spy(real);
         // 库里已有一条 EXIST：导入它应当是「改版」而不是「新增」
         seedExisting(spy);
@@ -269,7 +270,8 @@ class RuleImportServiceTest {
     @DisplayName("落库：改版遇到版本冲突（并发改过）被记为该行失败，不抛给调用方")
     void reportsOptimisticLockConflictAsRowFailure() {
         RuleService failing = spy(new RuleService(mock(AuditRuleMapper.class),
-            mock(AuditRuleVersionMapper.class), mock(RuleSetMapper.class)));
+            mock(AuditRuleVersionMapper.class), mock(RuleSetMapper.class),
+            new com.fasterxml.jackson.databind.ObjectMapper()));
         doReturn(new com.diting.dto.RuleResponse(
             1L, "EXIST", 3, "默认分组", "已存在的规则", "平台依据", "hit", "AGENT",
             null, List.of("旧词"), List.of(), null, 10, true, null, null)).when(failing).findByCode("EXIST");
@@ -296,7 +298,8 @@ class RuleImportServiceTest {
     @DisplayName("RuleService.validate 会收集全部问题（导入报告要一次说清）")
     void validateCollectsAllProblems() {
         RuleService real = new RuleService(mock(AuditRuleMapper.class),
-            mock(AuditRuleVersionMapper.class), mock(RuleSetMapper.class));
+            mock(AuditRuleVersionMapper.class), mock(RuleSetMapper.class),
+            new com.fasterxml.jackson.databind.ObjectMapper());
         RuleSaveRequest broken = new RuleSaveRequest(
             "", null, "", "", "不存在的类型", "WRONG", null, List.of(), List.of(), null, 999);
 

@@ -69,7 +69,7 @@ class DeletionSignedUrlSweepTest {
             mock(SentenceMapper.class), mock(SpeakerMappingMapper.class), mock(ViolationMapper.class),
             mock(ReportVersionMapper.class), mock(ExportJobMapper.class), mock(UploadSessionMapper.class),
             mock(TaskAssetMapper.class), mock(UserMapper.class), storage, mock(AuditLogService.class),
-            new DitingProperties(), new DeletionCleanupTransaction(jobs));
+            new DitingProperties(), new DeletionCleanupTransaction(jobs), mock(OrphanUploadCleanup.class));
 
         assertThat(service.processJob(job)).isFalse();
         assertThat(storage.exists(first)).isFalse();
@@ -115,7 +115,8 @@ class DeletionSignedUrlSweepTest {
         RetentionService service = new RetentionService(jobs, tasks, mock(SentenceMapper.class),
             mock(SpeakerMappingMapper.class), mock(ViolationMapper.class), mock(ReportVersionMapper.class),
             mock(ExportJobMapper.class), sessions, mock(TaskAssetMapper.class), mock(UserMapper.class),
-            storage, mock(AuditLogService.class), new DitingProperties(), new DeletionCleanupTransaction(jobs));
+            storage, mock(AuditLogService.class), new DitingProperties(), new DeletionCleanupTransaction(jobs),
+            mock(OrphanUploadCleanup.class));
 
         assertThat(service.processJob(job)).isFalse();
         assertThat(storage.exists(key)).isFalse();

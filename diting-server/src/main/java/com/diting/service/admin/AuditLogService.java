@@ -42,10 +42,11 @@ public class AuditLogService {
     public static final String RESULT_FAILED = "FAILED";
 
     private final AuditLogMapper auditLogMapper;
-    private final ObjectMapper json = new ObjectMapper();
+    private final ObjectMapper json;
 
-    public AuditLogService(AuditLogMapper auditLogMapper) {
+    public AuditLogService(AuditLogMapper auditLogMapper, ObjectMapper json) {
         this.auditLogMapper = auditLogMapper;
+        this.json = json;
     }
 
     /** 记录一条审计；detail 只允许放非敏感元数据 */

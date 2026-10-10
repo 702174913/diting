@@ -3,6 +3,7 @@ package com.diting.service;
 import com.diting.common.BizException;
 import com.diting.common.BusinessTime;
 import com.diting.common.ResultCode;
+import com.diting.common.QuotaState;
 import com.diting.entity.RecognitionTask;
 import com.diting.mapper.RecognitionTaskMapper;
 import com.diting.mapper.TaskAssetMapper;
@@ -41,7 +42,12 @@ public class TaskOcrWriter {
         }
         if ("DONE".equals(status) || "EMPTY".equals(status)) {
             // 成功响应已确认云端受理；资产结果与额度结算同事务，崩溃不留半份账。
-            quota.consume(task.getId());
+            if (!quota.consume(task.getId())) {
+                var ledger = quota.ledgerOf(task.getId());
+                if (ledger == null || !QuotaState.CONSUMED.name().equals(ledger.getState())) {
+                    throw new BizException(ResultCode.CONFLICT, "OCR 已受理但额度未结算，拒绝提交结果");
+                }
+            }
         }
     }
     @Transactional

@@ -4,6 +4,7 @@ import com.diting.config.DitingProperties;
 import com.diting.dto.ReportDetailResponse;
 import com.diting.entity.ExportJob;
 import com.diting.entity.RecognitionTask;
+import com.diting.entity.TaskAsset;
 import com.diting.entity.ReportVersion;
 import com.diting.mapper.ExportJobMapper;
 import com.diting.mapper.RecognitionTaskMapper;
@@ -14,7 +15,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.io.ByteArrayInputStream;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.zip.ZipInputStream;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -78,5 +82,89 @@ class ExportRecoveryTest {
         service.generate(job);
         verify(storage).delete(anyString());
         verify(jobs).finishFailure(eq(4L), anyString(), eq("FAILED"), eq("CONFLICT"), isNull(), any());
+    }
+
+    @Test void oversizedPdfNeverUploads() {
+        when(renderer.render(any())).thenReturn(new byte[64 * 1024 * 1024 + 1]);
+        service.generate(job);
+        verify(storage, never()).put(anyString(), any(), anyString());
+        verify(jobs).finishFailure(eq(4L), anyString(), eq("FAILED"), eq("ARTIFACT_TOO_LARGE"), isNull(), any());
+    }
+
+    @Test void oversizedOriginalStopsStreamingWithoutUploading() {
+        DitingProperties props = new DitingProperties();
+        props.getExport().setMaxArtifactBytes(32);
+        ExportService limited = new ExportService(jobs, tasks, reports, renderer, storage, assets,
+            props, new ExportLeaseService(jobs, tasks, reports));
+        job.setWithAudio(true);
+        task.setOssObject("audio/1.m4a");
+        when(assets.selectPurgeable(1L)).thenReturn(List.of());
+        when(assets.selectByTask(1L)).thenReturn(List.of());
+        when(storage.open("audio/1.m4a")).thenReturn(new ByteArrayInputStream(new byte[128]));
+
+        limited.generate(job);
+
+        verify(jobs).finishFailure(eq(4L), anyString(), eq("FAILED"), eq("ARTIFACT_TOO_LARGE"), isNull(), any());
+        verify(storage, never()).put(anyString(), any(), anyString());
+    }
+
+    @Test void missingImageWithLargeRecordedSizeIsSkipped() {
+        job.setWithAudio(true);
+        task.setOssObject("audio/1.m4a");
+        TaskAsset image = new TaskAsset();
+        image.setKind(TaskAsset.KIND_IMAGE);
+        image.setObjectKey("images/missing.jpg");
+        image.setSizeBytes(100L * 1024 * 1024);
+        image.setMediaFormat("jpg");
+        when(assets.selectByTask(1L)).thenReturn(List.of(image));
+        when(assets.selectPurgeable(1L)).thenReturn(List.of(image));
+        when(storage.open("audio/1.m4a")).thenReturn(new ByteArrayInputStream(new byte[]{1}));
+        when(storage.open("images/missing.jpg")).thenReturn(null);
+        when(jobs.completeClaim(eq(4L), anyString(), anyString(), any())).thenReturn(1);
+        AtomicReference<List<String>> entries = new AtomicReference<>();
+        doAnswer(invocation -> {
+            ZipInputStream zip = new ZipInputStream(invocation.getArgument(1));
+            List<String> names = new ArrayList<>();
+            for (var entry = zip.getNextEntry(); entry != null; entry = zip.getNextEntry()) {
+                names.add(entry.getName());
+            }
+            entries.set(names);
+            return null;
+        }).when(storage).putStream(anyString(), any(), anyLong(), eq("application/zip"));
+
+        service.generate(job);
+
+        verify(storage).open("images/missing.jpg");
+        verify(storage).putStream(anyString(), any(), anyLong(), eq("application/zip"));
+        assertThat(entries.get()).containsExactly("report.pdf", "audio.m4a");
+        verify(jobs, never()).finishFailure(eq(4L), anyString(), eq("FAILED"), eq("ARTIFACT_TOO_LARGE"), any(), any());
+    }
+
+    @Test void purgedImagesAreNeverOpenedWhilePackagingRemainingAudio() {
+        job.setWithAudio(true);
+        task.setOssObject("audio/1.m4a");
+        TaskAsset purged = new TaskAsset();
+        purged.setKind(TaskAsset.KIND_IMAGE);
+        purged.setObjectKey("");
+        when(assets.selectByTask(1L)).thenReturn(List.of(purged));
+        when(assets.selectPurgeable(1L)).thenReturn(List.of());
+        when(storage.open("audio/1.m4a")).thenReturn(new ByteArrayInputStream(new byte[]{1}));
+        when(jobs.completeClaim(eq(4L), anyString(), anyString(), any())).thenReturn(1);
+
+        service.generate(job);
+
+        verify(storage, never()).open("");
+        verify(storage).putStream(anyString(), any(), anyLong(), eq("application/zip"));
+    }
+
+    @Test void missingAllOriginalsDoesNotPublishPdfOnlyZip() {
+        job.setWithAudio(true);
+        task.setOssObject("audio/gone.m4a");
+        when(storage.open("audio/gone.m4a")).thenReturn(null);
+
+        service.generate(job);
+
+        verify(storage, never()).putStream(anyString(), any(), anyLong(), anyString());
+        verify(jobs).finishFailure(eq(4L), anyString(), eq("FAILED"), eq("AUDIO_EXPIRED"), isNull(), any());
     }
 }

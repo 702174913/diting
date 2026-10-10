@@ -89,15 +89,16 @@ public class AuthService {
 
     public LoginOutcome loginByPassword(String username, String password, String clientIp) {
         String attemptKey = username + "@" + clientIp;
-        attemptGuard.assertAllowed(LOGIN_SCOPE, attemptKey);
-        User user = findByUsername(username);
-        if (user == null || user.getErasedAt() != null || user.getPasswordHash() == null
-            || !encoder.matches(password, user.getPasswordHash())) {
-            attemptGuard.recordFailure(LOGIN_SCOPE, attemptKey);
-            throw new BizException(ResultCode.LOGIN_FAILED);
-        }
-        attemptGuard.clear(LOGIN_SCOPE, attemptKey);
-        return new LoginOutcome(user, false);
+        return attemptGuard.withAttempt(LOGIN_SCOPE, attemptKey, () -> {
+            User user = findByUsername(username);
+            if (user == null || user.getErasedAt() != null || user.getPasswordHash() == null
+                || !encoder.matches(password, user.getPasswordHash())) {
+                attemptGuard.recordFailure(LOGIN_SCOPE, attemptKey);
+                throw new BizException(ResultCode.LOGIN_FAILED);
+            }
+            attemptGuard.clear(LOGIN_SCOPE, attemptKey);
+            return new LoginOutcome(user, false);
+        });
     }
 
     /** 当前登录账号绑定微信：一个 openid 只绑定一个账号 */

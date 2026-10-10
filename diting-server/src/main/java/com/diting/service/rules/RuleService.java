@@ -42,13 +42,14 @@ public class RuleService {
     private final AuditRuleMapper ruleMapper;
     private final AuditRuleVersionMapper versionMapper;
     private final RuleSetMapper ruleSetMapper;
-    private final ObjectMapper json = new ObjectMapper();
+    private final ObjectMapper json;
 
     public RuleService(AuditRuleMapper ruleMapper, AuditRuleVersionMapper versionMapper,
-                       RuleSetMapper ruleSetMapper) {
+                       RuleSetMapper ruleSetMapper, ObjectMapper json) {
         this.ruleMapper = ruleMapper;
         this.versionMapper = versionMapper;
         this.ruleSetMapper = ruleSetMapper;
+        this.json = json;
     }
 
     public PageResult<RuleResponse> list(PageQuery query, String keyword, Boolean enabled) {
@@ -173,7 +174,7 @@ public class RuleService {
             .last("LIMIT 1"));
         if (existing != null) {
             return new RuleSetSnapshot(existing.getVersion(),
-                versions.stream().map(RuleService::toDefinition).toList());
+                versions.stream().map(this::toDefinition).toList());
         }
 
         long nextVersion = nextRuleSetVersion();
@@ -183,7 +184,7 @@ public class RuleService {
         ruleSet.setCreatedAt(BusinessTime.now());
         ruleSetMapper.insert(ruleSet);
 
-        return new RuleSetSnapshot(nextVersion, versions.stream().map(RuleService::toDefinition).toList());
+        return new RuleSetSnapshot(nextVersion, versions.stream().map(this::toDefinition).toList());
     }
 
     /** 按快照版本取回规则定义（历史报告复算用） */
@@ -343,7 +344,7 @@ public class RuleService {
         );
     }
 
-    private static RuleModels.RuleDefinition toDefinition(AuditRuleVersion version) {
+    private RuleModels.RuleDefinition toDefinition(AuditRuleVersion version) {
         return new RuleModels.RuleDefinition(
             version.getRuleId(),
             version.getId(),
@@ -374,12 +375,12 @@ public class RuleService {
         return readJson(value);
     }
 
-    private static List<Long> readJsonLongs(String value) {
+    private List<Long> readJsonLongs(String value) {
         if (value == null || value.isBlank()) {
             return List.of();
         }
         try {
-            return new ObjectMapper().readValue(value, new TypeReference<List<Long>>() {
+            return json.readValue(value, new TypeReference<List<Long>>() {
             });
         }
         catch (Exception e) {
@@ -387,12 +388,12 @@ public class RuleService {
         }
     }
 
-    private static List<String> readJson(String value) {
+    private List<String> readJson(String value) {
         if (value == null || value.isBlank()) {
             return List.of();
         }
         try {
-            return new ObjectMapper().readValue(value, new TypeReference<List<String>>() {
+            return json.readValue(value, new TypeReference<List<String>>() {
             });
         }
         catch (Exception e) {

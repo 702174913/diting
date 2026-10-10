@@ -73,7 +73,7 @@ public class CallbackController {
         var tingwu = props.getAliyun().getTingwu();
         String path = callbackPath();
         String token = callbackToken();
-        String suffix = token.isBlank() ? "" : "/" + token;
+        String suffix = token.isBlank() ? "" : "/<callback-token>";
         String base = tingwu.getPublicBaseUrl() == null ? "" : tingwu.getPublicBaseUrl().trim();
         if (base.isBlank()) {
             log.warn("听悟回调未配置对外地址：请在听悟管控台（项目 → 回调方式 = HTTP post）填入 "
@@ -197,11 +197,6 @@ public class CallbackController {
     }
 
     private static String clientIp(HttpServletRequest request) {
-        String forwarded = request.getHeader("X-Forwarded-For");
-        if (forwarded != null && !forwarded.isBlank()) {
-            return forwarded.split(",")[0].trim();
-        }
-        String remote = request.getRemoteAddr();
-        return remote == null ? "unknown" : remote;
+        return com.diting.config.ClientAddress.of(request);
     }
 }

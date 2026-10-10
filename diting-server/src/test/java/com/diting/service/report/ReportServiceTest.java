@@ -82,7 +82,7 @@ class ReportServiceTest {
         ruleService = mock(RuleService.class);
         when(taskMapper.lockById(100L)).thenAnswer(inv -> task());
         service = new ReportService(mappingMapper, versionMapper, violationMapper, sentenceMapper,
-            ruleService, analysisService, taskMapper);
+            ruleService, analysisService, taskMapper, new com.fasterxml.jackson.databind.ObjectMapper());
     }
 
     /** 桩按显式 revision 参数过滤，不能把历史版本查询偷换成最新版本。 */

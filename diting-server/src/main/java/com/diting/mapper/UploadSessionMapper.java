@@ -19,6 +19,7 @@ public interface UploadSessionMapper extends BaseMapper<UploadSession> {
     /** 孤立上传：已签发/已校验但超过清理时间，且没有登记成任务的对象 */
     @Select("SELECT * FROM upload_sessions "
         + "WHERE status IN ('SIGNED','VERIFIED') AND cleanup_after <= NOW(3) "
+        + "AND signed_until < DATE_SUB(NOW(3), INTERVAL 1 MINUTE) "
         + "ORDER BY id LIMIT #{limit}")
     List<UploadSession> selectOrphans(@Param("limit") int limit);
 }

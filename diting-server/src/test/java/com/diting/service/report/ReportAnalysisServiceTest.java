@@ -49,7 +49,8 @@ class ReportAnalysisServiceTest {
         pipeline = mock(TaskPipelineService.class);
         ConfigService config = mock(ConfigService.class);
         when(config.load()).thenReturn(new ConfigService.PolicyConfig(1L, 3, 60, 10));
-        service = new ReportAnalysisService(versions, violations, new RuleMatchService(), config, pipeline, tasks);
+        service = new ReportAnalysisService(versions, violations, new RuleMatchService(), config, pipeline, tasks,
+            new com.fasterxml.jackson.databind.ObjectMapper());
         live = task(TaskStatus.WAITING_ROLE);
         when(tasks.lockById(42L)).thenReturn(live);
         when(versions.insert(any(ReportVersion.class))).thenAnswer(inv -> {

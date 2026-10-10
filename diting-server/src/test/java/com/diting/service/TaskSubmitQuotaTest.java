@@ -74,6 +74,28 @@ class TaskSubmitQuotaTest {
     }
 
     @Test
+    @DisplayName("录音与图片不可合并提交，且幂等键命中也不能绕过")
+    void rejectsMixedMediaBeforeIdempotentReturnOrConsumption() {
+        UploadSession image = new UploadSession();
+        image.setId(501L);
+        image.setUserId(1L);
+        image.setMediaKind(com.diting.common.MediaKind.IMAGE.name());
+        image.setStatus(UploadSessionService.STATUS_VERIFIED);
+        when(uploadSessionService.requireOwned(1L, 501L)).thenReturn(image);
+        when(taskMapper.selectOne(any())).thenReturn(task(100L, "reused-key"));
+
+        assertThatThrownBy(() -> service.submit(1L, java.util.List.of(500L, 501L), 30, "reused-key"))
+            .isInstanceOf(BizException.class)
+            .hasMessageContaining("录音和图片不能在同一任务中提交")
+            .extracting(e -> ((BizException) e).getResultCode())
+            .isEqualTo(ResultCode.UNPROCESSABLE);
+        verify(taskMapper, never()).selectOne(any());
+        verify(uploadSessionService, never()).consumeForSubmit(any(), any());
+        verify(quotaService, never()).reserve(any(), any(), anyInt());
+        verify(taskMapper, never()).insert(any(RecognitionTask.class));
+    }
+
+    @Test
     @DisplayName("QUOTA-04-1 同一幂等键重复提交：返回既有任务，不重复扣份数")
     void repeatedSubmitReturnsSameTask() {
         when(taskMapper.selectOne(any())).thenReturn(task(100L, "k-1"));

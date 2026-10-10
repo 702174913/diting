@@ -63,6 +63,7 @@ public class RetentionService {
     private final AuditLogService auditLogService;
     private final DitingProperties props;
     private final DeletionCleanupTransaction cleanupTransaction;
+    private final OrphanUploadCleanup orphanUploadCleanup;
 
     public RetentionService(DeletionJobMapper deletionJobMapper, RecognitionTaskMapper taskMapper,
                             SentenceMapper sentenceMapper,
@@ -72,7 +73,8 @@ public class RetentionService {
                             UploadSessionMapper uploadSessionMapper,
                             com.diting.mapper.TaskAssetMapper taskAssetMapper, UserMapper userMapper,
                             ObjectStorage objectStorage, AuditLogService auditLogService,
-                            DitingProperties props, DeletionCleanupTransaction cleanupTransaction) {
+                             DitingProperties props, DeletionCleanupTransaction cleanupTransaction,
+                             OrphanUploadCleanup orphanUploadCleanup) {
         this.deletionJobMapper = deletionJobMapper;
         this.taskMapper = taskMapper;
         this.sentenceMapper = sentenceMapper;
@@ -87,6 +89,7 @@ public class RetentionService {
         this.auditLogService = auditLogService;
         this.props = props;
         this.cleanupTransaction = cleanupTransaction;
+        this.orphanUploadCleanup = orphanUploadCleanup;
     }
 
     /** 一轮清理：作业 → 到期原件 → 孤立上传 → 到期产物 */
@@ -282,9 +285,7 @@ public class RetentionService {
         int done = 0;
         for (UploadSession session : uploadSessionMapper.selectOrphans(props.getRetention().getBatchSize())) {
             try {
-                safeDelete(session.getObjectKey());
-                uploadSessionMapper.deleteById(session.getId());
-                done++;
+                if (orphanUploadCleanup.cleanup(session.getId())) done++;
             }
             catch (Exception e) {
                 log.warn("孤立上传清理失败（session {}）：{}", session.getId(), e.getMessage());

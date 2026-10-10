@@ -49,24 +49,24 @@ public class AdminUserService {
     /** 后台登录：账号不存在、密码错误、密码为空都返回同一文案，不泄露账号是否存在 */
     public AdminLoginResult login(String username, String password, String clientIp) {
         String attemptKey = username + "@" + clientIp;
-        attemptGuard.assertAllowed(LOGIN_SCOPE, attemptKey);
-
-        AdminUser account = findByUsername(username);
-        if (account == null || account.getPasswordHash() == null
-            || !encoder.matches(password, account.getPasswordHash())) {
-            attemptGuard.recordFailure(LOGIN_SCOPE, attemptKey);
-            throw new BizException(ResultCode.LOGIN_FAILED);
-        }
-        if (!Boolean.TRUE.equals(account.getEnabled())) {
-            throw new BizException(ResultCode.ACCOUNT_DISABLED);
-        }
-        AdminRole role = AdminRole.of(account.getRole());
-        if (role == null) {
-            throw new BizException(ResultCode.FORBIDDEN, "账号角色无效，请联系管理员");
-        }
-        attemptGuard.clear(LOGIN_SCOPE, attemptKey);
-        String token = tokenService.issue(account.getId(), LoginDomain.ADMIN);
-        return new AdminLoginResult(token, role.name(), account.getNickname());
+        return attemptGuard.withAttempt(LOGIN_SCOPE, attemptKey, () -> {
+            AdminUser account = findByUsername(username);
+            if (account == null || account.getPasswordHash() == null
+                || !encoder.matches(password, account.getPasswordHash())) {
+                attemptGuard.recordFailure(LOGIN_SCOPE, attemptKey);
+                throw new BizException(ResultCode.LOGIN_FAILED);
+            }
+            if (!Boolean.TRUE.equals(account.getEnabled())) {
+                throw new BizException(ResultCode.ACCOUNT_DISABLED);
+            }
+            AdminRole role = AdminRole.of(account.getRole());
+            if (role == null) {
+                throw new BizException(ResultCode.FORBIDDEN, "账号角色无效，请联系管理员");
+            }
+            attemptGuard.clear(LOGIN_SCOPE, attemptKey);
+            String token = tokenService.issue(account.getId(), LoginDomain.ADMIN);
+            return new AdminLoginResult(token, role.name(), account.getNickname());
+        });
     }
 
     /**

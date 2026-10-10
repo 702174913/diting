@@ -11,6 +11,7 @@ import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Supplier;
 
 /**
  * 最小登录失败保护：同一「身份域 + 账号 + 客户端 IP」在窗口内失败次数超限即拒绝。
@@ -27,16 +28,50 @@ public class LoginAttemptGuard {
     private static final int MAX_KEYS = 10_000;
 
     private final Map<String, Deque<Instant>> failures = new ConcurrentHashMap<>();
+    private final Map<String, AttemptGate> activeAttempts = new ConcurrentHashMap<>();
+    private final Object capacityLock = new Object();
     private Clock clock = Clock.systemUTC();
+
+    private static final class AttemptGate {
+        private int users;
+    }
 
     /** 仅测试使用：注入可控时钟 */
     void useClock(Clock testClock) {
         this.clock = testClock;
     }
 
+    /** 同一身份域/账号/来源的一次验证必须与准入和记账串行执行。 */
+    public <T> T withAttempt(String scope, String key, Supplier<T> verification) {
+        String id = composeKey(scope, key);
+        AttemptGate gate = activeAttempts.compute(id, (ignored, existing) -> {
+            AttemptGate value = existing == null ? new AttemptGate() : existing;
+            value.users++;
+            return value;
+        });
+        try {
+            synchronized (gate) {
+                assertAllowed(scope, key);
+                return verification.get();
+            }
+        }
+        finally {
+            activeAttempts.computeIfPresent(id, (ignored, current) -> {
+                current.users--;
+                return current.users == 0 ? null : current;
+            });
+        }
+    }
+
     public void assertAllowed(String scope, String key) {
         Deque<Instant> window = failures.get(composeKey(scope, key));
         if (window == null) {
+            if (failures.size() >= MAX_KEYS) {
+                evictExpired();
+                if (failures.size() >= MAX_KEYS) {
+                    throw new BizException(ResultCode.TOO_MANY_REQUESTS, "登录保护已达到容量上限，请稍后再试");
+                }
+            }
             return;
         }
         synchronized (window) {
@@ -49,15 +84,34 @@ public class LoginAttemptGuard {
     }
 
     public void recordFailure(String scope, String key) {
-        if (failures.size() > MAX_KEYS) {
-            failures.clear();
+        Deque<Instant> window;
+        synchronized (capacityLock) {
+            assertAllowedCapacity(scope, key);
+            window = failures.computeIfAbsent(composeKey(scope, key), k -> new ArrayDeque<>());
         }
-        Deque<Instant> window = failures.computeIfAbsent(composeKey(scope, key),
-            k -> new ArrayDeque<>());
         synchronized (window) {
             prune(window);
             window.addLast(clock.instant());
         }
+    }
+
+    private void assertAllowedCapacity(String scope, String key) {
+        if (failures.containsKey(composeKey(scope, key))) return;
+        if (failures.size() >= MAX_KEYS) {
+            evictExpired();
+            if (failures.size() >= MAX_KEYS) {
+                throw new BizException(ResultCode.TOO_MANY_REQUESTS, "登录保护已达到容量上限，请稍后再试");
+            }
+        }
+    }
+
+    private void evictExpired() {
+        failures.forEach((id, window) -> {
+            synchronized (window) {
+                prune(window);
+                if (window.isEmpty()) failures.remove(id, window);
+            }
+        });
     }
 
     public void clear(String scope, String key) {

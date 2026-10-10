@@ -167,6 +167,16 @@ public class AliyunOssObjectStorage implements ObjectStorage {
     }
 
     @Override
+    public void putStream(String objectKey, InputStream content, long length, String contentType) {
+        com.aliyun.oss.model.ObjectMetadata metadata = new com.aliyun.oss.model.ObjectMetadata();
+        metadata.setContentLength(length);
+        if (contentType != null && !contentType.isBlank()) {
+            metadata.setContentType(contentType);
+        }
+        oss.putObject(bucket, objectKey, content, metadata);
+    }
+
+    @Override
     public byte[] read(String objectKey) {
         try (OSSObject object = oss.getObject(bucket, objectKey);
              InputStream in = object.getObjectContent()) {
@@ -180,6 +190,12 @@ public class AliyunOssObjectStorage implements ObjectStorage {
     @Override
     public void delete(String objectKey) {
         oss.deleteObject(bucket, objectKey);
+    }
+
+    @Override
+    public InputStream open(String objectKey) {
+        OSSObject object = oss.getObject(bucket, objectKey);
+        return object == null ? null : object.getObjectContent();
     }
 
     @PreDestroy

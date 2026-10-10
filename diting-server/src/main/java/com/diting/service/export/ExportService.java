@@ -19,7 +19,12 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.FilterOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -123,23 +128,29 @@ public class ExportService {
             return false;
         }
         String key = null;
+        Path zipFile = null;
         try {
             assertOriginalsUsable(claimed.task(), Boolean.TRUE.equals(job.getWithAudio()));
             byte[] pdf = renderer.render(buildReport(claimed.task(), job, claimed.assets()));
-            byte[] artifact = Boolean.TRUE.equals(job.getWithAudio())
-                ? zip(pdf, claimed.task(), claimed.assets()) : pdf;
-            if (artifact.length > props.getExport().getMaxArtifactBytes()) {
+            if (pdf.length > props.getExport().getMaxArtifactBytes()) {
                 markFailed(job, claimed.token(), "ARTIFACT_TOO_LARGE", false);
                 return true;
             }
-            String contentType = Boolean.TRUE.equals(job.getWithAudio()) ? "application/zip" : "application/pdf";
+            boolean withOriginals = Boolean.TRUE.equals(job.getWithAudio());
+            if (withOriginals) zipFile = zip(pdf, claimed.task(), packageableImages(claimed.task()));
             LocalDateTime expires = BusinessTime.now().plusHours(props.getExport().getArtifactTtlHours());
-            if (Boolean.TRUE.equals(job.getWithAudio()) && claimed.task().getExpiresAt() != null
+            if (withOriginals && claimed.task().getExpiresAt() != null
                 && claimed.task().getExpiresAt().isBefore(expires)) {
                 expires = claimed.task().getExpiresAt();
             }
             key = objectKeyFor(job, claimed.token());
-            objectStorage.put(key, artifact, contentType);
+            if (withOriginals) {
+                try (InputStream input = Files.newInputStream(zipFile)) {
+                    objectStorage.putStream(key, input, Files.size(zipFile), "application/zip");
+                }
+            } else {
+                objectStorage.put(key, pdf, "application/pdf");
+            }
             leaseService.publish(job.getId(), claimed.token(), job.getReportVersionId(), key, expires);
             return true;
         }
@@ -153,10 +164,17 @@ public class ExportService {
                     log.warn("导出作业 {} 未发布产物清理失败，须由 OSS 生命周期规则回收", job.getId());
                 }
             }
-            boolean retry = !(e instanceof BizException biz) || biz.getResultCode() == ResultCode.PROCESSING;
-            markFailed(job, claimed.token(), e instanceof BizException biz
-                ? biz.getResultCode().getSymbol() : "EXPORT_FAILED", retry);
+            boolean tooLarge = e instanceof ArtifactTooLarge;
+            boolean retry = !tooLarge && (!(e instanceof BizException biz)
+                || biz.getResultCode() == ResultCode.PROCESSING);
+            markFailed(job, claimed.token(), tooLarge ? "ARTIFACT_TOO_LARGE"
+                : e instanceof BizException biz ? biz.getResultCode().getSymbol() : "EXPORT_FAILED", retry);
             return true;
+        }
+        finally {
+            if (zipFile != null) {
+                deleteTempFile(zipFile);
+            }
         }
     }
 
@@ -238,11 +256,17 @@ public class ExportService {
         }
         boolean audioUsable = !Boolean.TRUE.equals(task.getAudioPurged()) && task.getOssObject() != null
             && !task.getOssObject().isBlank();
-        boolean imageUsable = taskAssetMapper.selectPurgeable(task.getId()).stream()
-            .anyMatch(com.diting.entity.TaskAsset::isImage);
+        boolean imageUsable = !packageableImages(task).isEmpty();
         if (!audioUsable && !imageUsable) {
             throw new BizException(ResultCode.AUDIO_EXPIRED, "记录里已没有可打包的原件（录音或图片）");
         }
+    }
+
+    private List<com.diting.entity.TaskAsset> packageableImages(RecognitionTask task) {
+        return taskAssetMapper.selectPurgeable(task.getId()).stream()
+            .filter(com.diting.entity.TaskAsset::isImage)
+            .filter(asset -> asset.getObjectKey() != null && !asset.getObjectKey().isBlank())
+            .toList();
     }
 
     /**
@@ -406,50 +430,134 @@ public class ExportService {
         return spans;
     }
 
-    /** ZIP：报告 PDF + 未改动的原始音频 */
     /**
      * ZIP：报告 PDF + 原始音频（如有）+ 图片原件（S16）。
      * 目录结构固定：`report.pdf`、`audio.<ext>`、`images/<序号>-<文件名>`；
      * 某个原件已清理时跳过它，而不是让整包失败（用户在界面上已被提示「原件已清理」）。
      */
-    private byte[] zip(byte[] pdf, RecognitionTask task, java.util.List<com.diting.entity.TaskAsset> assets) {
-        boolean hasAudio = task.getOssObject() != null && !task.getOssObject().isBlank();
+    private Path zip(byte[] pdf, RecognitionTask task, java.util.List<com.diting.entity.TaskAsset> assets) {
+        boolean hasAudio = !Boolean.TRUE.equals(task.getAudioPurged())
+            && task.getOssObject() != null && !task.getOssObject().isBlank();
         boolean hasImage = assets.stream().anyMatch(com.diting.entity.TaskAsset::isImage);
         if (!hasAudio && !hasImage) {
             throw new BizException(ResultCode.AUDIO_EXPIRED, "记录里已没有可打包的原件");
         }
-        try (ByteArrayOutputStream out = new ByteArrayOutputStream();
-             ZipOutputStream zip = new ZipOutputStream(out)) {
-            zip.putNextEntry(new ZipEntry("report.pdf"));
-            zip.write(pdf);
-            zip.closeEntry();
-            if (hasAudio) {
-                byte[] audio = objectStorage.read(task.getOssObject());
-                if (audio != null) {
-                    zip.putNextEntry(new ZipEntry("audio" + extensionOf(task.getOssObject())));
-                    zip.write(audio);
-                    zip.closeEntry();
-                }
-            }
-            int index = 0;
-            for (com.diting.entity.TaskAsset asset : assets) {
-                if (!asset.isImage()) {
-                    continue;
-                }
-                index++;
-                byte[] image = objectStorage.read(asset.getObjectKey());
-                if (image == null) {
-                    continue;
-                }
-                zip.putNextEntry(new ZipEntry("images/%d-%s".formatted(index, safeName(asset.getFilename()))));
-                zip.write(image);
+        long limit = props.getExport().getMaxArtifactBytes();
+        // 不允许压缩率极高的输入绕开原件体积预算；实际 ZIP 输出也单独限额。
+        long remaining = limit - pdf.length;
+        if (remaining < 0) throw artifactTooLarge();
+        Path file = null;
+        try {
+            file = Files.createTempFile("diting-export-", ".zip");
+            try (ZipOutputStream zip = new ZipOutputStream(new BoundedOutput(Files.newOutputStream(file), limit))) {
+                int originalCount = 0;
+                zip.putNextEntry(new ZipEntry("report.pdf"));
+                zip.write(pdf);
                 zip.closeEntry();
+                if (hasAudio) {
+                    try (InputStream audio = objectStorage.open(task.getOssObject())) {
+                        if (audio != null) {
+                            zip.putNextEntry(new ZipEntry("audio" + extensionOf(task.getOssObject())));
+                            remaining = copyBounded(audio, zip, remaining);
+                            zip.closeEntry();
+                            originalCount++;
+                        }
+                    }
+                }
+                int index = 0;
+                for (com.diting.entity.TaskAsset asset : assets) {
+                    if (!asset.isImage()) {
+                        continue;
+                    }
+                    index++;
+                    if (asset.getObjectKey() == null || asset.getObjectKey().isBlank()) {
+                        continue;
+                    }
+                    try (InputStream image = objectStorage.open(asset.getObjectKey())) {
+                        if (image == null) {
+                            continue;
+                        }
+                        zip.putNextEntry(new ZipEntry("images/%d-%s".formatted(index, safeName(asset.getFilename()))));
+                        remaining = copyBounded(image, zip, remaining);
+                        zip.closeEntry();
+                        originalCount++;
+                    }
+                }
+                if (originalCount == 0) {
+                    throw new BizException(ResultCode.AUDIO_EXPIRED, "原件已清理，无法生成含原件的导出包");
+                }
+                zip.finish();
             }
-            zip.finish();
-            return out.toByteArray();
+            return file;
+        }
+        catch (BizException e) {
+            deleteTempFile(file);
+            throw e;
         }
         catch (Exception e) {
+            deleteTempFile(file);
             throw new BizException(ResultCode.INTERNAL_ERROR, "打包 ZIP 失败：" + e.getMessage());
+        }
+    }
+
+    private static void deleteTempFile(Path file) {
+        if (file == null) return;
+        try {
+            Files.deleteIfExists(file);
+        }
+        catch (IOException e) {
+            log.warn("导出临时 ZIP 清理失败：{}", file, e);
+        }
+    }
+
+    private static long copyBounded(InputStream input, ZipOutputStream zip, long remaining) throws IOException {
+        byte[] buffer = new byte[8192];
+        int count;
+        while ((count = input.read(buffer)) != -1) {
+            if (count > remaining) {
+                throw artifactTooLarge();
+            }
+            remaining -= count;
+            zip.write(buffer, 0, count);
+        }
+        return remaining;
+    }
+
+    private static ArtifactTooLarge artifactTooLarge() {
+        return new ArtifactTooLarge();
+    }
+
+    private static final class ArtifactTooLarge extends BizException {
+        private ArtifactTooLarge() {
+            super(ResultCode.UNPROCESSABLE, "导出内容超过体积上限");
+        }
+    }
+
+    private static final class BoundedOutput extends FilterOutputStream {
+        private final long limit;
+        private long count;
+
+        private BoundedOutput(OutputStream out, long limit) {
+            super(out);
+            this.limit = limit;
+        }
+
+        @Override
+        public void write(byte[] bytes, int off, int len) throws IOException {
+            if (len > limit - count) {
+                throw artifactTooLarge();
+            }
+            out.write(bytes, off, len);
+            count += len;
+        }
+
+        @Override
+        public void write(int value) throws IOException {
+            if (count >= limit) {
+                throw artifactTooLarge();
+            }
+            out.write(value);
+            count++;
         }
     }
 

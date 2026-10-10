@@ -75,12 +75,8 @@ public class AuthController {
         return LoginResult.of(authService.issueToken(user), user, outcome.isNewUser());
     }
 
-    /** 登录失败保护的计数维度之一；反向代理场景需要按实际部署补 X-Forwarded-For 解析 */
+    /** 登录失败保护只认直连来源；代理部署须在可信代理层统一限流。 */
     private static String clientIp(HttpServletRequest request) {
-        String forwarded = request.getHeader("X-Forwarded-For");
-        if (forwarded != null && !forwarded.isBlank()) {
-            return forwarded.split(",")[0].trim();
-        }
-        return request.getRemoteAddr();
+        return com.diting.config.ClientAddress.of(request);
     }
 }

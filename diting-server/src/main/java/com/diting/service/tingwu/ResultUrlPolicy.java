@@ -18,6 +18,9 @@ public interface ResultUrlPolicy {
     /** 不满足时抛异常；调用方不得忽略 */
     void assertAllowed(URI uri);
 
+    /** 返回经过校验的 DNS 地址，下载器必须将连接绑定到这些地址。 */
+    InetAddress[] resolveAllowed(URI uri);
+
     /** 允许的最大重定向次数：每一跳都要重新过策略 */
     default int maxRedirects() {
         return 0;
@@ -59,6 +62,11 @@ public interface ResultUrlPolicy {
 
         @Override
         public void assertAllowed(URI uri) {
+            resolveAllowed(uri);
+        }
+
+        @Override
+        public InetAddress[] resolveAllowed(URI uri) {
             if (uri == null || uri.getScheme() == null) {
                 throw new Violation("结果地址不合法");
             }
@@ -76,7 +84,9 @@ public interface ResultUrlPolicy {
             if (isForbiddenHost(host)) {
                 throw new Violation("结果地址指向内网或本机，已拒绝：" + host);
             }
-            for (InetAddress address : resolver.apply(host)) {
+            InetAddress[] addresses = resolver.apply(host);
+            if (addresses == null || addresses.length == 0) throw new Violation("结果地址没有可用的解析地址");
+            for (InetAddress address : addresses) {
                 // 注意：JDK 的 isSiteLocalAddress 只覆盖 IPv6 的 fec0::/10（已废弃），
                 // fc00::/7（唯一本地地址）要自己判，否则私网 IPv6 会被放行。
                 if (address.isLoopbackAddress() || address.isSiteLocalAddress()
@@ -85,6 +95,7 @@ public interface ResultUrlPolicy {
                     throw new Violation("结果地址解析到内网或本机：" + address.getHostAddress());
                 }
             }
+            return addresses;
         }
 
         @Override
@@ -105,8 +116,9 @@ public interface ResultUrlPolicy {
             String lower = host.toLowerCase(java.util.Locale.ROOT);
             return httpAllowedSuffixes.stream()
                 .map(suffix -> suffix.trim().toLowerCase(java.util.Locale.ROOT))
+                .map(suffix -> suffix.startsWith(".") ? suffix.substring(1) : suffix)
                 .filter(suffix -> !suffix.isEmpty())
-                .anyMatch(lower::endsWith);
+                .anyMatch(suffix -> lower.equals(suffix) || lower.endsWith("." + suffix));
         }
 
         private static boolean isForbiddenHost(String host) {

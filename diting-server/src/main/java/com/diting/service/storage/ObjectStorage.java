@@ -3,6 +3,10 @@ package com.diting.service.storage;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
+import java.io.InputStream;
+import java.io.IOException;
+import com.diting.common.BizException;
+import com.diting.common.ResultCode;
 
 /**
  * 对象存储端口（开发文档 §5.1）。
@@ -39,8 +43,30 @@ public interface ObjectStorage {
     /** 服务端直传（导出产物、报告 PDF 等由服务端生成后写入） */
     void put(String objectKey, byte[] content, String contentType);
 
+    /** 从流上传指定长度的产物；实现方不得将整个流读入内存，调用方负责关闭流。 */
+    void putStream(String objectKey, InputStream content, long length, String contentType);
+
     /** 读取完整对象（导出打包原件时用；调用方需自行限制体积） */
     byte[] read(String objectKey);
+
+    /** 读取有上限的原件；即使上传后被覆盖，也不能在大小校验前无限分配内存。 */
+    default byte[] readLimited(String objectKey, int maxBytes) {
+        if (maxBytes < 0 || maxBytes == Integer.MAX_VALUE) throw new IllegalArgumentException("非法读取上限");
+        try (InputStream input = open(objectKey)) {
+            if (input == null) return null;
+            byte[] bytes = input.readNBytes(maxBytes + 1);
+            if (bytes.length > maxBytes) {
+                throw new BizException(ResultCode.UNPROCESSABLE, "原件超过大小上限");
+            }
+            return bytes;
+        }
+        catch (IOException e) {
+            throw new IllegalStateException("读取对象失败", e);
+        }
+    }
+
+    /** 流式读取原件，调用方负责关闭。 */
+    InputStream open(String objectKey);
 
     void delete(String objectKey);
 

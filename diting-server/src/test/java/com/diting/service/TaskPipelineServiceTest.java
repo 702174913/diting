@@ -206,6 +206,8 @@ class TaskPipelineServiceTest {
     @DisplayName("JOB-09 TRANSCRIBING 且远端完成：只重跑解析落库，不再提交付费转写")
     void reparseWithoutResubmit() {
         RecognitionTask task = task(103L, TaskStatus.TRANSCRIBING);
+        when(taskMapper.advance(eq(103L), anyLong(), eq(TaskStatus.PARSING.name()),
+            any(), any(), any(), any())).thenReturn(1);
         task.setTaskId("tw-103");
         due(task);
         when(tingwuService.getTaskInfo("tw-103")).thenReturn(new TingwuService.TaskInfo("tw-103",
@@ -226,6 +228,8 @@ class TaskPipelineServiceTest {
         assertThat(rows.getAllValues()).extracting(Sentence::getSequence).containsExactly(1, 2);
         assertThat(rows.getAllValues()).extracting(Sentence::getText)
             .containsExactly("你好，我", "喂，你好。");
+        verify(taskMapper).advance(eq(103L), eq(1L), eq(TaskStatus.PARSING.name()),
+            any(), any(), any(), any());
         verify(reportService).analyzeWithoutRoles(task);
         verify(taskMapper, never()).advance(eq(103L), anyLong(), eq(TaskStatus.WAITING_ROLE.name()),
             any(), any(), any(), any());
@@ -282,9 +286,40 @@ class TaskPipelineServiceTest {
 
         ArgumentCaptor<String> status = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<String> code = ArgumentCaptor.forClass(String.class);
-        verify(taskMapper).advance(eq(106L), eq(1L), status.capture(), any(), code.capture(), any(), any());
+        verify(taskMapper).failParsing(eq(106L), eq(1L), status.capture(), code.capture(), any(), any(), isNull());
         assertThat(status.getValue()).isEqualTo(TaskStatus.PARSING.name());
         assertThat(code.getValue()).isEqualTo(TaskPipelineService.ERR_PARSE_FAILED);
+    }
+
+    @Test
+    void parsingFailuresHaveTheirOwnLimitWithoutCountingNormalPolling() {
+        RecognitionTask task = task(119L, TaskStatus.PARSING);
+        task.setTaskId("tw-119");
+        task.setAttemptCount(400);
+        task.setParseFailures(2);
+        due(task);
+        when(tingwuService.getTaskInfo("tw-119")).thenThrow(new IllegalStateException("network failure"));
+
+        pipeline.tick();
+
+        verify(taskMapper).failParsing(eq(119L), eq(1L), eq("FAILED"),
+            eq(TaskPipelineService.ERR_PARSE_FAILED), any(), isNull(), any());
+        verify(tingwuService, never()).submitTranscription(anyString(), any());
+    }
+
+    @Test
+    void manySuccessfulPollsDoNotExhaustParsingRetryBudget() {
+        RecognitionTask task = task(120L, TaskStatus.PARSING);
+        task.setTaskId("tw-120");
+        task.setAttemptCount(400);
+        task.setParseFailures(0);
+        due(task);
+        when(tingwuService.getTaskInfo("tw-120")).thenThrow(new IllegalStateException("network failure"));
+
+        pipeline.tick();
+
+        verify(taskMapper).failParsing(eq(120L), eq(1L), eq("PARSING"),
+            eq(TaskPipelineService.ERR_PARSE_FAILED), any(), any(), isNull());
     }
 
     @Test

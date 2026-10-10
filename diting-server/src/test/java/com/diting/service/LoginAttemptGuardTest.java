@@ -9,6 +9,10 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -69,5 +73,52 @@ class LoginAttemptGuardTest {
         guard.useClock(Clock.fixed(START.plus(Duration.ofMinutes(11)), ZoneOffset.UTC));
         assertThat(guard.failureCount("ADMIN_LOGIN", "carol@10.0.0.3")).isZero();
         guard.assertAllowed("ADMIN_LOGIN", "carol@10.0.0.3");
+    }
+
+    @Test void tooManyDistinctKeysNeverClearExistingLockouts() {
+        LoginAttemptGuard guard = new LoginAttemptGuard();
+        guard.useClock(Clock.fixed(START, ZoneOffset.UTC));
+        for (int i = 0; i < LoginAttemptGuard.MAX_FAILURES; i++) {
+            guard.recordFailure("ADMIN_LOGIN", "locked");
+        }
+        for (int i = 0; i < 9_999; i++) {
+            guard.recordFailure("ADMIN_LOGIN", "other-" + i);
+        }
+        assertThatThrownBy(() -> guard.recordFailure("ADMIN_LOGIN", "overflow"))
+            .isInstanceOf(BizException.class);
+        assertThat(guard.failureCount("ADMIN_LOGIN", "locked"))
+            .isEqualTo(LoginAttemptGuard.MAX_FAILURES);
+    }
+
+    @Test void concurrentAttemptsForSameKeyAreSerialized() throws Exception {
+        LoginAttemptGuard guard = new LoginAttemptGuard();
+        CountDownLatch inside = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicInteger checks = new AtomicInteger();
+        var executor = Executors.newFixedThreadPool(2);
+        try {
+            var first = executor.submit(() -> guard.withAttempt("USER_LOGIN", "same", () -> {
+                checks.incrementAndGet();
+                inside.countDown();
+                try { release.await(2, TimeUnit.SECONDS); }
+                catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+                guard.recordFailure("USER_LOGIN", "same");
+                return false;
+            }));
+            assertThat(inside.await(2, TimeUnit.SECONDS)).isTrue();
+            var second = executor.submit(() -> guard.withAttempt("USER_LOGIN", "same", () -> {
+                checks.incrementAndGet();
+                return true;
+            }));
+            assertThat(checks.get()).isEqualTo(1);
+            release.countDown();
+            first.get(2, TimeUnit.SECONDS);
+            second.get(2, TimeUnit.SECONDS);
+            assertThat(checks.get()).isEqualTo(2);
+        }
+        finally {
+            release.countDown();
+            executor.shutdownNow();
+        }
     }
 }

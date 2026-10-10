@@ -104,7 +104,7 @@ class RuleServiceTest {
         when(ruleSetMapper.selectList(any())).thenAnswer(inv -> ruleSets.stream()
             .sorted(java.util.Comparator.comparing(RuleSet::getVersion).reversed()).toList());
 
-        service = new RuleService(ruleMapper, versionMapper, ruleSetMapper);
+        service = new RuleService(ruleMapper, versionMapper, ruleSetMapper, new com.fasterxml.jackson.databind.ObjectMapper());
     }
 
     private static RuleSaveRequest hitRule(String code, int deduct) {

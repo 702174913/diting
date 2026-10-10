@@ -1,5 +1,8 @@
 package com.diting.service.storage;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -68,9 +71,28 @@ public class InMemoryObjectStorage implements ObjectStorage {
     }
 
     @Override
+    public void putStream(String objectKey, InputStream content, long length, String contentType) {
+        if (length < 0 || length >= Integer.MAX_VALUE) throw new IllegalArgumentException("内存存储上传长度超限");
+        try {
+            byte[] bytes = content.readNBytes((int) length + 1);
+            if (bytes.length != length) throw new IllegalStateException("上传长度不匹配");
+            putObject(objectKey, bytes, contentType);
+        }
+        catch (IOException e) {
+            throw new IllegalStateException("读取上传流失败", e);
+        }
+    }
+
+    @Override
     public byte[] read(String objectKey) {
         StoredObject object = objects.get(objectKey);
         return object == null ? null : object.content().clone();
+    }
+
+    @Override
+    public InputStream open(String objectKey) {
+        StoredObject object = objects.get(objectKey);
+        return object == null ? null : new ByteArrayInputStream(object.content());
     }
 
     @Override

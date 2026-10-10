@@ -23,7 +23,8 @@ class DeletionFencingTest {
     private final RetentionService service = new RetentionService(jobs, tasks, mock(SentenceMapper.class),
         mappings, mock(ViolationMapper.class), versions, mock(ExportJobMapper.class),
         mock(UploadSessionMapper.class), assets, mock(UserMapper.class),
-        mock(ObjectStorage.class), audit, new DitingProperties(), new DeletionCleanupTransaction(jobs));
+        mock(ObjectStorage.class), audit, new DitingProperties(), new DeletionCleanupTransaction(jobs),
+        mock(OrphanUploadCleanup.class));
 
     private static DeletionJob queued() {
         DeletionJob job = new DeletionJob(); job.setId(3L); job.setTargetType("TASK");

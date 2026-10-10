@@ -28,14 +28,23 @@ public class TranscriptionParser {
     /** 结果体积上限：超过视为异常（防止超大结果拖垮进程），ASR-09 */
     private static final int DEFAULT_MAX_WORDS = 200_000;
 
-    private final ObjectMapper mapper = new ObjectMapper();
+    private final ObjectMapper mapper;
     private final int maxWords;
 
     public TranscriptionParser() {
-        this(DEFAULT_MAX_WORDS);
+        this(new ObjectMapper(), DEFAULT_MAX_WORDS);
+    }
+
+    public TranscriptionParser(ObjectMapper mapper) {
+        this(mapper, DEFAULT_MAX_WORDS);
     }
 
     public TranscriptionParser(int maxWords) {
+        this(new ObjectMapper(), maxWords);
+    }
+
+    private TranscriptionParser(ObjectMapper mapper, int maxWords) {
+        this.mapper = mapper;
         this.maxWords = maxWords;
     }
 

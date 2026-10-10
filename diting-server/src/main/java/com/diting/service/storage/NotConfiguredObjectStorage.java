@@ -4,6 +4,7 @@ import com.diting.common.BizException;
 import com.diting.common.ResultCode;
 
 import java.time.Duration;
+import java.io.InputStream;
 
 /**
  * 未配置对象存储时的实现：调用即 503 NOT_CONFIGURED。
@@ -43,6 +44,16 @@ public class NotConfiguredObjectStorage implements ObjectStorage {
 
     @Override
     public byte[] read(String objectKey) {
+        throw notConfigured();
+    }
+
+    @Override
+    public InputStream open(String objectKey) {
+        throw notConfigured();
+    }
+
+    @Override
+    public void putStream(String objectKey, InputStream content, long length, String contentType) {
         throw notConfigured();
     }
 

@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 
 import java.net.URL;
 import java.util.Map;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
  * 通义听悟客户端适配（开发文档 §5.1—§5.3）。
@@ -33,17 +34,19 @@ public class TingwuService {
     private final TingwuApi api;
     private final TranscriptionDownloader downloader;
     private final TranscriptionParser parser;
+    private final ObjectMapper json;
 
-    public TingwuService(DitingProperties props, OssService ossService, TingwuApi api) {
+    public TingwuService(DitingProperties props, OssService ossService, TingwuApi api, ObjectMapper json) {
         this.props = props;
         this.ossService = ossService;
         this.api = api;
+        this.json = json;
         this.downloader = new TranscriptionDownloader(new ResultUrlPolicy.Strict(
             props.getAliyun().getTingwu().isAllowHttpResult()
                 ? java.util.Arrays.stream(props.getAliyun().getTingwu().getHttpResultHostSuffixes().split(","))
                     .map(String::trim).filter(s -> !s.isEmpty()).toList()
                 : java.util.List.of()));
-        this.parser = new TranscriptionParser();
+        this.parser = new TranscriptionParser(json);
     }
 
     /** 远端状态 → 内部可判定的四态 + 未知 */
@@ -109,29 +112,17 @@ public class TingwuService {
 
     /** CreateTask 请求体：转写参数放在 parameters 下 */
     String buildCreateTaskBody(String fileUrl, String appKey, String businessKey) {
-        String diarization = speakerCount() > 0
-            ? """
-              "Transcription": { "DiarizationEnabled": true, "Diarization": { "SpeakerCount": %d } }"""
-            .formatted(speakerCount())
-            : """
-              "Transcription": { "DiarizationEnabled": true }""";
-        String taskKey = businessKey == null || businessKey.isBlank()
-            ? ""
-            : "\n                \"TaskKey\": \"%s\",".formatted(businessKey.replace("\"", ""));
-        // SourceLanguage 官方取值是 cn（不是 zh）；TaskKey 用于业务对账
-        return """
-            {
-              "AppKey": "%s",
-              "Input": {
-                "SourceLanguage": "%s",%s
-                "FileUrl": "%s",
-                "ProgressiveCallbacksEnabled": true
-              },
-              "Parameters": {
-                %s
-              }
-            }
-            """.formatted(appKey, sourceLanguage(), taskKey, fileUrl, diarization.indent(0).trim());
+        var root = json.createObjectNode();
+        root.put("AppKey", appKey);
+        var input = root.putObject("Input");
+        input.put("SourceLanguage", sourceLanguage());
+        if (businessKey != null && !businessKey.isBlank()) input.put("TaskKey", businessKey);
+        input.put("FileUrl", fileUrl);
+        input.put("ProgressiveCallbacksEnabled", true);
+        var transcription = root.putObject("Parameters").putObject("Transcription");
+        transcription.put("DiarizationEnabled", true);
+        if (speakerCount() > 0) transcription.putObject("Diarization").put("SpeakerCount", speakerCount());
+        return root.toString();
     }
 
     private String sourceLanguage() {

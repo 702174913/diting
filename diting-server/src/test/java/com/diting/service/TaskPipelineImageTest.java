@@ -68,6 +68,7 @@ class TaskPipelineImageTest {
         reportService = mock(ReportService.class);
 
         when(configService.load()).thenReturn(new ConfigService.PolicyConfig(1L, 3, 60, 10));
+        when(quotaService.consume(anyLong())).thenReturn(true);
         when(tingwuService.isConfigured()).thenReturn(true);
         when(ocrService.isConfigured()).thenReturn(true);
         when(taskMapper.claim(anyLong(), anyLong(), anyString(), any())).thenReturn(1);
@@ -145,7 +146,7 @@ class TaskPipelineImageTest {
         TaskAsset asset = imageAsset(9L, "images/1/a.jpg");
         when(taskAssetMapper.selectImagesToOcr(206L)).thenReturn(List.of(asset));
 
-        when(objectStorage.read("images/1/a.jpg")).thenReturn(jpeg());
+        when(objectStorage.readLimited("images/1/a.jpg", 10 * 1024 * 1024)).thenReturn(jpeg());
         // OcrService 返回的是「按阅读顺序排好的行」；这里用桩数据走真实解析
         when(ocrService.recognize(any())).thenReturn(OcrParser.parse(StubOcrApi.STUB_DATA));
         when(taskAssetMapper.selectByTask(206L)).thenReturn(List.of());
@@ -201,7 +202,7 @@ class TaskPipelineImageTest {
         TaskAsset asset = imageAsset(11L, "images/1/b.jpg");
         when(taskAssetMapper.selectImagesToOcr(203L)).thenReturn(List.of(asset));
 
-        when(objectStorage.read("images/1/b.jpg")).thenReturn(jpeg());
+        when(objectStorage.readLimited("images/1/b.jpg", 10 * 1024 * 1024)).thenReturn(jpeg());
         when(ocrService.recognize(any())).thenThrow(new IllegalStateException("OCR 调用失败：timeout"));
 
         pipeline.tick();
@@ -222,7 +223,7 @@ class TaskPipelineImageTest {
         asset.setOcrStatus(TaskAsset.OCR_RUNNING);
         asset.setOcrAttempts(1);
         when(taskAssetMapper.selectImagesToOcr(214L)).thenReturn(List.of(asset));
-        when(objectStorage.read(asset.getObjectKey())).thenReturn(jpeg());
+        when(objectStorage.readLimited(asset.getObjectKey(), 10 * 1024 * 1024)).thenReturn(jpeg());
         when(ocrService.recognize(any())).thenReturn(OcrParser.parse(StubOcrApi.STUB_DATA));
         pipeline.tick();
         verify(taskAssetMapper).claimOcr(eq(14L), eq(214L), anyString(), any(), eq(3));
@@ -253,7 +254,7 @@ class TaskPipelineImageTest {
         when(taskMapper.selectDue(anyInt())).thenReturn(List.of(task));
         TaskAsset asset = imageAsset(16L, "images/1/not-open.jpg");
         when(taskAssetMapper.selectImagesToOcr(216L)).thenReturn(List.of(asset));
-        when(objectStorage.read(asset.getObjectKey())).thenReturn(jpeg());
+        when(objectStorage.readLimited(asset.getObjectKey(), 10 * 1024 * 1024)).thenReturn(jpeg());
         when(ocrService.recognize(any())).thenThrow(
             OcrApiException.ofCode("ocrServiceNotOpen", "You have not activated the OCR service."));
 
@@ -277,7 +278,7 @@ class TaskPipelineImageTest {
         when(taskMapper.selectDue(anyInt())).thenReturn(List.of(task));
         TaskAsset asset = imageAsset(17L, "images/1/throttled.jpg");
         when(taskAssetMapper.selectImagesToOcr(217L)).thenReturn(List.of(asset));
-        when(objectStorage.read(asset.getObjectKey())).thenReturn(jpeg());
+        when(objectStorage.readLimited(asset.getObjectKey(), 10 * 1024 * 1024)).thenReturn(jpeg());
         when(ocrService.recognize(any())).thenThrow(
             OcrApiException.ofCode("Throttling.User", "超过限流阈值"));
 
@@ -299,7 +300,7 @@ class TaskPipelineImageTest {
         when(taskMapper.selectDue(anyInt())).thenReturn(List.of(task));
         TaskAsset asset = imageAsset(18L, "images/1/too-big.jpg");
         when(taskAssetMapper.selectImagesToOcr(218L)).thenReturn(List.of(asset));
-        when(objectStorage.read(asset.getObjectKey())).thenReturn(jpeg());
+        when(objectStorage.readLimited(asset.getObjectKey(), 10 * 1024 * 1024)).thenReturn(jpeg());
         when(ocrService.recognize(any())).thenThrow(
             new BizException(ResultCode.UNPROCESSABLE, "图片尺寸超出识别范围：长宽需大于 15 像素且小于 8192 像素"));
 
@@ -320,7 +321,7 @@ class TaskPipelineImageTest {
         when(taskMapper.selectDue(anyInt())).thenReturn(List.of(task));
         TaskAsset asset = imageAsset(19L, "images/1/roundtrip.jpg");
         when(taskAssetMapper.selectImagesToOcr(219L)).thenReturn(List.of(asset));
-        when(objectStorage.read(asset.getObjectKey())).thenReturn(jpeg());
+        when(objectStorage.readLimited(asset.getObjectKey(), 10 * 1024 * 1024)).thenReturn(jpeg());
         when(ocrService.recognize(any())).thenReturn(OcrParser.parse(StubOcrApi.STUB_DATA));
         // 识别完的同轮就会重建图片句子（harness 的 finishOcr 桩会把文本写回同一行）
         when(taskAssetMapper.selectByTask(219L)).thenReturn(List.of(asset));
@@ -357,7 +358,7 @@ class TaskPipelineImageTest {
         TaskAsset asset = imageAsset(21L, "images/1/mixed.jpg");
         when(taskAssetMapper.selectImagesToOcr(210L)).thenReturn(List.of(asset));
 
-        when(objectStorage.read(asset.getObjectKey())).thenReturn(jpeg());
+        when(objectStorage.readLimited(asset.getObjectKey(), 10 * 1024 * 1024)).thenReturn(jpeg());
         when(ocrService.recognize(any())).thenReturn(OcrParser.parse(StubOcrApi.STUB_DATA));
         when(sentenceMapper.selectMaxSequence(210L)).thenReturn(3);
 

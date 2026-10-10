@@ -92,6 +92,10 @@ class ResultUrlPolicyTest {
         assertThatThrownBy(() -> policy.assertAllowed(URI.create("http://evil.example.com/x.json")))
             .isInstanceOf(ResultUrlPolicy.Violation.class)
             .hasMessageContaining("HTTPS");
+        assertThatThrownBy(() -> policy.assertAllowed(URI.create("http://notaliyuncs.com/x.json")))
+            .isInstanceOf(ResultUrlPolicy.Violation.class);
+        assertThatCode(() -> policy.assertAllowed(URI.create("http://aliyuncs.com/x.json")))
+            .doesNotThrowAnyException();
 
         // 受信任域名 + 私网解析：仍要拒绝（防 SSRF）
         ResultUrlPolicy.Strict privateHost = new ResultUrlPolicy.Strict(
@@ -99,6 +103,11 @@ class ResultUrlPolicyTest {
         assertThatThrownBy(() -> privateHost.assertAllowed(
             URI.create("http://oss.aliyuncs.com/x.json")))
             .isInstanceOf(ResultUrlPolicy.Violation.class)
+            .hasMessageContaining("内网");
+
+        ResultUrlPolicy.Strict dotted = new ResultUrlPolicy.Strict(
+            host -> new InetAddress[]{InetAddress.getLoopbackAddress()}, List.of(".aliyuncs.com"));
+        assertThatThrownBy(() -> dotted.assertAllowed(URI.create("http://oss.aliyuncs.com/x.json")))
             .hasMessageContaining("内网");
     }
 
@@ -147,6 +156,12 @@ class ResultUrlPolicyTest {
                 if (!"http".equals(uri.getScheme()) && !"https".equals(uri.getScheme())) {
                     throw new Violation("只允许 http/https（测试策略）");
                 }
+            }
+
+            @Override
+            public InetAddress[] resolveAllowed(URI uri) {
+                assertAllowed(uri);
+                return new InetAddress[]{InetAddress.getLoopbackAddress()};
             }
 
             @Override

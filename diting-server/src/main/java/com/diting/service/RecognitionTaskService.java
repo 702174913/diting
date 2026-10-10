@@ -79,7 +79,7 @@ public class RecognitionTaskService {
     }
 
     /**
-     * 登记任务（S16：一次提交可含音频 ≤1 + 图片 ≤6）。
+     * 登记任务（一次提交只能选择录音或图片；录音 ≤1，图片 ≤6）。
      *
      * 校验顺序有意为之：先把全部会话取出来判类型与数量，再逐个消费——
      * 避免「消费了前几个、后面校验失败」把用户的会话白白烧掉。
@@ -95,17 +95,6 @@ public class RecognitionTaskService {
         }
         List<Long> ids = normalizeUploadIds(uploadIds);
         String key = normalizeIdempotencyKey(ids, idempotencyKey);
-        RecognitionTask existing = findByIdempotencyKey(userId, key);
-        if (existing != null) {
-            return existing;
-        }
-
-        ConfigService.PolicyConfig config = configService.load();
-        int maxSeconds = config.maxRecordingMinutes() * 60;
-        if (declaredDurationSec != null && declaredDurationSec > maxSeconds) {
-            throw new BizException(ResultCode.UNPROCESSABLE,
-                "录音时长超过上限（" + config.maxRecordingMinutes() + " 分钟）");
-        }
 
         // 只认本人的会话；这里只读校验，真正消费在后面统一做
         List<UploadSession> sessions = ids.stream()
@@ -124,7 +113,20 @@ public class RecognitionTaskService {
         if (imageSessions.size() > maxImages) {
             throw new BizException(ResultCode.UNPROCESSABLE, "一次最多上传 " + maxImages + " 张图片");
         }
-        // 缺少实际受理能力时在消费上传会话和预占额度前拒绝；混合任务两端都须已配置。
+        if (!audioSessions.isEmpty() && !imageSessions.isEmpty()) {
+            throw new BizException(ResultCode.UNPROCESSABLE, "录音和图片不能在同一任务中提交，请分别提交");
+        }
+        RecognitionTask existing = findByIdempotencyKey(userId, key);
+        if (existing != null) {
+            return existing;
+        }
+        ConfigService.PolicyConfig config = configService.load();
+        int maxSeconds = config.maxRecordingMinutes() * 60;
+        if (declaredDurationSec != null && declaredDurationSec > maxSeconds) {
+            throw new BizException(ResultCode.UNPROCESSABLE,
+                "录音时长超过上限（" + config.maxRecordingMinutes() + " 分钟）");
+        }
+        // 缺少实际受理能力时在消费上传会话和预占额度前拒绝。
         if (!audioSessions.isEmpty() && !tingwuService.isConfigured()) {
             throw new BizException(ResultCode.NOT_CONFIGURED, "音频转写服务未配置");
         }

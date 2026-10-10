@@ -58,6 +58,15 @@ public interface RecognitionTaskMapper extends BaseMapper<RecognitionTask> {
                 @Param("errorCode") String errorCode, @Param("errorMsg") String errorMsg,
                 @Param("finishedAt") LocalDateTime finishedAt);
 
+    @Update("UPDATE recognition_tasks SET version=version+1, parse_failures=parse_failures+1, "
+        + "status=#{next}, error_code=#{errorCode}, error_msg=#{message}, next_attempt_at=#{retryAt}, "
+        + "finished_at=#{finishedAt}, lease_until=NULL WHERE id=#{id} AND version=#{version} "
+        + "AND deleted_at IS NULL AND status IN ('TRANSCRIBING','PARSING')")
+    int failParsing(@Param("id") Long id, @Param("version") long version,
+                    @Param("next") String next, @Param("errorCode") String errorCode,
+                    @Param("message") String message, @Param("retryAt") LocalDateTime retryAt,
+                    @Param("finishedAt") LocalDateTime finishedAt);
+
     /**
      * 到期原件：保留期已过、且**还有对象没清理**的任务（音频或图片；文本保留时长另议，不在此删除）。
      * 用「还有对象」而不是 audio_purged 标志：纯图片任务没有音频，标志永远为 0，

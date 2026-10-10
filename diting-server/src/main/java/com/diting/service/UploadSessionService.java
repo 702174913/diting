@@ -116,6 +116,7 @@ public class UploadSessionService {
         session.setCreatedAt(now);
         session.setSignedUntil(LocalDateTime.ofInstant(presigned.expiresAt(), BusinessTime.ZONE));
         session.setCleanupAfter(now.plusHours(props.getMedia().getSessionTtlHours()));
+        extendCleanupPastSignature(session);
         uploadSessionMapper.insert(session);
 
         return new SignResult(session.getId(), session.getObjectKey(), presigned, session.getCleanupAfter());
@@ -257,8 +258,16 @@ public class UploadSessionService {
             objectStorage.presignPut(session.getObjectKey(), signTtl(), contentTypeOf(session.getMediaFormat(),
                 extensionOf(session.getFilename())));
         session.setSignedUntil(LocalDateTime.ofInstant(presigned.expiresAt(), BusinessTime.ZONE));
+        extendCleanupPastSignature(session);
         uploadSessionMapper.updateById(session);
         return new SignResult(session.getId(), session.getObjectKey(), presigned, session.getCleanupAfter());
+    }
+
+    private static void extendCleanupPastSignature(UploadSession session) {
+        LocalDateTime safeCleanup = session.getSignedUntil().plusMinutes(1);
+        if (session.getCleanupAfter() == null || session.getCleanupAfter().isBefore(safeCleanup)) {
+            session.setCleanupAfter(safeCleanup);
+        }
     }
 
     private Duration signTtl() {

@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
+import java.net.InetAddress;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -31,6 +32,13 @@ class TranscriptionDownloaderTest {
             if (!"http".equals(uri.getScheme()) && !"https".equals(uri.getScheme())) {
                 throw new Violation("只允许 http/https（测试策略）");
             }
+        }
+
+        @Override
+        public InetAddress[] resolveAllowed(URI uri) {
+            assertAllowed(uri);
+            try { return InetAddress.getAllByName(uri.getHost()); }
+            catch (IOException e) { throw new Violation("测试域名无法解析"); }
         }
 
         @Override
@@ -77,6 +85,42 @@ class TranscriptionDownloaderTest {
     }
 
     @Test
+    void connectsUsingOnlyTheValidatedAddress() throws Exception {
+        respond("/pinned", 200, "pinned-response", null);
+        int port = server.getAddress().getPort();
+        ResultUrlPolicy pinned = new ResultUrlPolicy() {
+            @Override public void assertAllowed(URI uri) { }
+            @Override public InetAddress[] resolveAllowed(URI uri) {
+                return new InetAddress[]{loopback()};
+            }
+            private InetAddress loopback() {
+                try { return InetAddress.getByName("127.0.0.1"); }
+                catch (Exception e) { throw new IllegalStateException(e); }
+            }
+        };
+        // 此域名不需要在系统 DNS 中存在；实际请求只能走策略返回的 IP。
+        assertThat(new TranscriptionDownloader(pinned).download(
+            "http://result.invalid:" + port + "/pinned")).isEqualTo("pinned-response");
+    }
+
+    @Test
+    void dnsResolutionCannotBlockPastDownloadDeadline() {
+        ResultUrlPolicy slow = new ResultUrlPolicy() {
+            @Override public void assertAllowed(URI uri) { }
+            @Override public InetAddress[] resolveAllowed(URI uri) {
+                try { Thread.sleep(2000); }
+                catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+                return new InetAddress[]{InetAddress.getLoopbackAddress()};
+            }
+        };
+        long started = System.nanoTime();
+        assertThatThrownBy(() -> new TranscriptionDownloader(slow, 1024, Duration.ofMillis(100))
+            .download(base + "/dns"))
+            .isInstanceOf(BizException.class).hasMessageContaining("超时");
+        assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(1));
+    }
+
+    @Test
     @DisplayName("超过体积上限：中断并报错，不把超大结果读进内存")
     void sizeLimited() {
         respond("/big", 200, "x".repeat(4096), null);
@@ -85,6 +129,25 @@ class TranscriptionDownloaderTest {
         assertThatThrownBy(() -> downloader.download(base + "/big"))
             .isInstanceOf(BizException.class)
             .hasMessageContaining("体积上限");
+    }
+
+    @Test
+    void tricklingResponseCannotExtendOverallDeadline() {
+        server.createContext("/slow", exchange -> {
+            exchange.sendResponseHeaders(200, 0);
+            try (OutputStream out = exchange.getResponseBody()) {
+                for (int i = 0; i < 30; i++) {
+                    out.write('x');
+                    out.flush();
+                    try { Thread.sleep(40); }
+                    catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }
+                }
+            }
+            catch (IOException ignored) { /* 客户端按总时限主动断开 */ }
+        });
+        TranscriptionDownloader downloader = new TranscriptionDownloader(TEST_POLICY, 1024, Duration.ofMillis(230));
+        assertThatThrownBy(() -> downloader.download(base + "/slow"))
+            .isInstanceOf(BizException.class).hasMessageContaining("超时");
     }
 
     @Test

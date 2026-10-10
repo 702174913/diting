@@ -37,7 +37,7 @@ class TingwuServiceTest {
         DitingProperties props = new DitingProperties();
         props.getAliyun().getTingwu().setAppKey("app-key-stub");
         props.getAliyun().getTingwu().setDiarizationSpeakerCount(0);
-        service = new TingwuService(props, ossService, api);
+        service = new TingwuService(props, ossService, api, new com.fasterxml.jackson.databind.ObjectMapper());
     }
 
     private static Map<String, Object> response(String status, String transcriptionUrl) {
@@ -82,25 +82,36 @@ class TingwuServiceTest {
 
         assertThat(body).contains("\"Parameters\"");
         assertThat(body).contains("\"Transcription\"");
-        assertThat(body).contains("\"DiarizationEnabled\": true");
+        assertThat(body).contains("\"DiarizationEnabled\":true");
         // 顶层不允许再出现 Transcription（旧实现的错误位置）
         int parametersIndex = body.indexOf("\"Parameters\"");
         int transcriptionIndex = body.indexOf("\"Transcription\"");
         assertThat(parametersIndex).isLessThan(transcriptionIndex);
         assertThat(body).doesNotContain("\"SpeakerCount\"");
         // 官方取值是 cn（不是 zh），且带上了业务键 TaskKey
-        assertThat(body).contains("\"SourceLanguage\": \"cn\"");
-        assertThat(body).contains("\"TaskKey\": \"auto:abc\"");
+        assertThat(body).contains("\"SourceLanguage\":\"cn\"");
+        assertThat(body).contains("\"TaskKey\":\"auto:abc\"");
+    }
+
+    @Test
+    void createTaskEscapesClientKeyAndSignedUrl() throws Exception {
+        String key = "key\\with\"quote\nand newline";
+        String url = "https://oss.example.com/a?name=\"quoted\"&other=1";
+        String body = service.buildCreateTaskBody(url, "app\nkey", key);
+        var parsed = new com.fasterxml.jackson.databind.ObjectMapper().readTree(body);
+        assertThat(parsed.path("Input").path("TaskKey").asText()).isEqualTo(key);
+        assertThat(parsed.path("Input").path("FileUrl").asText()).isEqualTo(url);
+        assertThat(parsed.path("AppKey").asText()).isEqualTo("app\nkey");
     }
 
     @Test
     @DisplayName("催收通话默认指定双人，显式设为 0 时才交给云端自动判断")
     void defaultSpeakerCountIsTwo() {
         DitingProperties props = new DitingProperties();
-        TingwuService withDefault = new TingwuService(props, mock(OssService.class), api);
+        TingwuService withDefault = new TingwuService(props, mock(OssService.class), api, new com.fasterxml.jackson.databind.ObjectMapper());
 
         assertThat(withDefault.buildCreateTaskBody("https://x/a.m4a", "k", null))
-            .contains("\"DiarizationEnabled\": true", "\"SpeakerCount\": 2");
+            .contains("\"DiarizationEnabled\":true", "\"SpeakerCount\":2");
     }
 
     @Test
@@ -109,9 +120,9 @@ class TingwuServiceTest {
         DitingProperties props = new DitingProperties();
         props.getAliyun().getTingwu().setAppKey("k");
         props.getAliyun().getTingwu().setDiarizationSpeakerCount(3);
-        TingwuService withCount = new TingwuService(props, mock(OssService.class), api);
+        TingwuService withCount = new TingwuService(props, mock(OssService.class), api, new com.fasterxml.jackson.databind.ObjectMapper());
 
-        assertThat(withCount.buildCreateTaskBody("https://x/a.m4a", "k", null)).contains("\"SpeakerCount\": 3");
+        assertThat(withCount.buildCreateTaskBody("https://x/a.m4a", "k", null)).contains("\"SpeakerCount\":3");
     }
 
     @Test

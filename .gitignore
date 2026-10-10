@@ -9,6 +9,7 @@ __pycache__/
 .vite/
 .ruff_cache/
 .pytest_cache/
+release/
 
 # ── 敏感文件：真实密钥与数据库导出（本地保留，不进版本库）──
 # diting.env 明确写了「含真实密钥」；.env.* 为各端本地/生产配置

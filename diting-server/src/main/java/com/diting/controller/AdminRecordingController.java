@@ -200,15 +200,22 @@ public class AdminRecordingController {
             .map(sentence -> new com.diting.dto.SentenceResponse(
                 sentence.id(), sentence.sequence(), sentence.sourceAssetId(), sentence.speakerId(), sentence.role(),
                 sentence.startMs(), sentence.endMs(), RedactionService.redact(sentence.text()),
-                sentence.speechSpeed(), sentence.highlights(), sentence.ruleVersionIds(), sentence.notes()))
+                sentence.speechSpeed(), sentence.highlights(), sentence.ruleVersionIds(),
+                sentence.notes().stream().map(RedactionService::redact).toList()))
+            .toList();
+        List<com.diting.dto.ViolationResponse> violations = detail.violations().stream()
+            .map(v -> new com.diting.dto.ViolationResponse(v.id(), v.ruleVersionId(),
+                RedactionService.redact(v.ruleName()), v.matchType(), v.scope(), v.sentenceId(),
+                v.triggerSentenceId(), v.evidenceSentenceIds(), v.ranges(), v.deduct(),
+                RedactionService.redact(v.note())))
             .toList();
         return new ReportDetailResponse(detail.id(), detail.taskId(), detail.reportNo(), detail.taskStatus(),
             detail.durationSec(), detail.createdAt(), detail.reportVersionId(), detail.reportVersion(),
             detail.status(), detail.latestStatus(), detail.mappingRevision(), detail.speakerMapping(),
             detail.rolesConfirmed(), detail.sentenceCount(), detail.flaggedCount(), detail.violationCount(),
             detail.riskScore(), detail.complianceScore(), detail.threshold(), detail.riskFlagged(),
-            detail.publishedAt(), detail.audioAvailable(), true, detail.notes(), sentences,
-            detail.violations());
+            detail.publishedAt(), detail.audioAvailable(), true,
+            detail.notes().stream().map(RedactionService::redact).toList(), sentences, violations);
     }
 
     private static LocalDateTime startOf(String date) {

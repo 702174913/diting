@@ -1,6 +1,7 @@
 package com.diting.service;
 
 import com.diting.common.BizException;
+import com.diting.entity.QuotaLedger;
 import com.diting.entity.RecognitionTask;
 import com.diting.mapper.RecognitionTaskMapper;
 import com.diting.mapper.TaskAssetMapper;
@@ -60,9 +61,27 @@ class TaskOcrWriterTest {
         when(tasks.lockById(1L)).thenReturn(snapshot());
         when(assets.claimOcr(eq(5L), eq(1L), eq("token"), any(), eq(3))).thenReturn(1);
         when(assets.finishOcr(5L, 1L, "token", "DONE", "text", null)).thenReturn(1);
+        when(quota.consume(1L)).thenReturn(true);
         assertThat(writer.claim(snapshot(), 5L, "token", 60, 3)).isTrue();
         writer.finish(snapshot(), 5L, "token", "DONE", "text", null);
         verify(quota).consume(1L);
+    }
+
+    @Test void alreadyConsumedQuotaAllowsSubsequentImageResult() {
+        when(tasks.lockById(1L)).thenReturn(snapshot());
+        when(assets.finishOcr(5L, 1L, "token", "DONE", "text", null)).thenReturn(1);
+        QuotaLedger ledger = new QuotaLedger();
+        ledger.setState("CONSUMED");
+        when(quota.ledgerOf(1L)).thenReturn(ledger);
+        writer.finish(snapshot(), 5L, "token", "DONE", "text", null);
+        verify(quota).consume(1L);
+    }
+
+    @Test void missingQuotaLedgerRejectsSuccessfulOcr() {
+        when(tasks.lockById(1L)).thenReturn(snapshot());
+        when(assets.finishOcr(5L, 1L, "token", "DONE", "text", null)).thenReturn(1);
+        assertThatThrownBy(() -> writer.finish(snapshot(), 5L, "token", "DONE", "text", null))
+            .isInstanceOf(BizException.class).hasMessageContaining("额度未结算");
     }
 
     @Test void quotaFailureRollsBackOcrResultTransaction() {

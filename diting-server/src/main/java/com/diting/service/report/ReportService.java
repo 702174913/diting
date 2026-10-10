@@ -50,11 +50,12 @@ public class ReportService {
     private final RuleService ruleService;
     private final ReportAnalysisService analysisService;
     private final RecognitionTaskMapper taskMapper;
+    private final ObjectMapper json;
 
     public ReportService(SpeakerMappingMapper speakerMappingMapper, ReportVersionMapper reportVersionMapper,
                          ViolationMapper violationMapper, SentenceMapper sentenceMapper,
                          RuleService ruleService, ReportAnalysisService analysisService,
-                         RecognitionTaskMapper taskMapper) {
+                         RecognitionTaskMapper taskMapper, ObjectMapper json) {
         this.speakerMappingMapper = speakerMappingMapper;
         this.reportVersionMapper = reportVersionMapper;
         this.violationMapper = violationMapper;
@@ -62,6 +63,7 @@ public class ReportService {
         this.ruleService = ruleService;
         this.analysisService = analysisService;
         this.taskMapper = taskMapper;
+        this.json = json;
     }
 
     /** 映射与报告同事务；任何失败整体回滚，客户端可用原 revision 重试，不留下半份映射。 */
@@ -353,7 +355,7 @@ public class ReportService {
             return List.of();
         }
         try {
-            return new ObjectMapper().readValue(value, type);
+            return json.readValue(value, type);
         }
         catch (Exception e) {
             return List.of();
