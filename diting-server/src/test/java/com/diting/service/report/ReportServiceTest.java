@@ -45,6 +45,7 @@ class ReportServiceTest {
     private RecognitionTaskMapper taskMapper;
     private ReportAnalysisService analysisService;
     private RuleService ruleService;
+    private com.diting.service.rules.LegalClauseService legalClauseService;
 
     @BeforeEach
     void setUp() {
@@ -80,9 +81,11 @@ class ReportServiceTest {
         taskMapper = mock(RecognitionTaskMapper.class);
         analysisService = mock(ReportAnalysisService.class);
         ruleService = mock(RuleService.class);
+        legalClauseService = mock(com.diting.service.rules.LegalClauseService.class);
         when(taskMapper.lockById(100L)).thenAnswer(inv -> task());
         service = new ReportService(mappingMapper, versionMapper, violationMapper, sentenceMapper,
-            ruleService, analysisService, taskMapper, new com.fasterxml.jackson.databind.ObjectMapper());
+            ruleService, legalClauseService, analysisService, taskMapper,
+            new com.fasterxml.jackson.databind.ObjectMapper());
     }
 
     /** 桩按显式 revision 参数过滤，不能把历史版本查询偷换成最新版本。 */
@@ -415,6 +418,25 @@ class ReportServiceTest {
         violation.setRanges(sentenceId == null ? "[]" : "[{\"sentenceId\":" + sentenceId + ",\"start\":0,\"end\":4}]");
         violation.setEvidenceKey("k" + System.nanoTime());
         return violation;
+    }
+
+    @Test
+    @DisplayName("V13 命中项带出规则当前绑定的法律条款（绑定实时生效，非发布时快照）")
+    void violationCarriesBoundLegalClauses() {
+        givenPublishedVersion(1L, 30, 60);
+        sentences.add(sentence(1L, 1, 0, "保证免息。"));
+        violations.add(violation(1L, 101L, 1L, 30, "命中《禁用承诺》"));
+        var clause = new com.diting.dto.LegalClauseResponse(7L, "个人信息保护法", "第十三条",
+            "符合下列情形之一的，个人信息处理者方可处理个人信息……", null, true, null, null);
+        when(legalClauseService.clausesByRuleVersionIds(any()))
+            .thenReturn(Map.of(101L, List.of(clause)));
+
+        ReportDetailResponse detail = service.detail(task(), null);
+
+        assertThat(detail.violations()).hasSize(1);
+        assertThat(detail.violations().get(0).legalClauses()).hasSize(1);
+        assertThat(detail.violations().get(0).legalClauses().get(0).lawName()).isEqualTo("个人信息保护法");
+        assertThat(detail.violations().get(0).legalClauses().get(0).articleNo()).isEqualTo("第十三条");
     }
 
     @Test

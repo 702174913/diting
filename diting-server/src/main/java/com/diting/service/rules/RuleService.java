@@ -7,6 +7,7 @@ import com.diting.common.BusinessTime;
 import com.diting.common.PageQuery;
 import com.diting.common.PageResult;
 import com.diting.common.ResultCode;
+import com.diting.dto.LegalClauseResponse;
 import com.diting.dto.RuleResponse;
 import com.diting.dto.RuleSaveRequest;
 import com.diting.entity.AuditRule;
@@ -42,13 +43,16 @@ public class RuleService {
     private final AuditRuleMapper ruleMapper;
     private final AuditRuleVersionMapper versionMapper;
     private final RuleSetMapper ruleSetMapper;
+    private final LegalClauseService legalClauseService;
     private final ObjectMapper json;
 
     public RuleService(AuditRuleMapper ruleMapper, AuditRuleVersionMapper versionMapper,
-                       RuleSetMapper ruleSetMapper, ObjectMapper json) {
+                       RuleSetMapper ruleSetMapper, LegalClauseService legalClauseService,
+                       ObjectMapper json) {
         this.ruleMapper = ruleMapper;
         this.versionMapper = versionMapper;
         this.ruleSetMapper = ruleSetMapper;
+        this.legalClauseService = legalClauseService;
         this.json = json;
     }
 
@@ -58,7 +62,12 @@ public class RuleService {
             .eq(enabled != null, AuditRule::getEnabled, enabled)
             .orderByAsc(AuditRule::getId);
         Page<AuditRule> page = ruleMapper.selectPage(Page.of(query.page(), query.pageSize()), wrapper);
-        List<RuleResponse> items = page.getRecords().stream().map(this::toResponse).toList();
+        // 条款绑定按规则批量取，列表不逐行查（N+1）
+        Map<Long, List<LegalClauseResponse>> clauses = legalClauseService
+            .clausesByRuleIds(page.getRecords().stream().map(AuditRule::getId).toList());
+        List<RuleResponse> items = page.getRecords().stream()
+            .map(rule -> toResponse(rule, currentVersion(rule), clauses.getOrDefault(rule.getId(), List.of())))
+            .toList();
         return PageResult.of(items, page.getTotal(), query);
     }
 
@@ -76,7 +85,8 @@ public class RuleService {
         List<AuditRuleVersion> rows = versionMapper.selectList(new LambdaQueryWrapper<AuditRuleVersion>()
             .eq(AuditRuleVersion::getRuleId, ruleId)
             .orderByDesc(AuditRuleVersion::getVersion));
-        return rows.stream().map(row -> toResponse(rule, row)).toList();
+        // 版本历史不返回条款绑定：绑定不属于版本快照（V13 口径）
+        return rows.stream().map(row -> toResponse(rule, row, List.of())).toList();
     }
 
     /** 按编码查当前规则：批量导入预检靠它判断一行是「新增」还是「改版」 */
@@ -104,7 +114,7 @@ public class RuleService {
 
         AuditRuleVersion version = newVersion(rule.getId(), 1, req, now);
         versionMapper.insert(version);
-        return toResponse(rule, version);
+        return toResponse(rule, version, List.of());
     }
 
     /** 修改规则：带 expectedVersion 的乐观锁，冲突返回 409，并生成新版本 */
@@ -133,7 +143,16 @@ public class RuleService {
             throw new BizException(ResultCode.CONFLICT, "规则版本推进冲突，请重试");
         }
         rule.setCurrentVersion(nextVersion);
-        return toResponse(rule, version);
+        return toResponse(rule, version, legalClauseService.clausesOfRule(ruleId));
+    }
+
+    /**
+     * 绑定法律条款（V13）：替换式，空列表解绑全部。
+     * 绑定实时生效、**不生成规则新版本**——不碰 audit_rule_versions 与 current_version。
+     */
+    @Transactional
+    public List<LegalClauseResponse> bindLegalClauses(Long ruleId, List<Long> clauseIds) {
+        return legalClauseService.bindRuleClauses(ruleId, clauseIds);
     }
 
     /** 启用/停用：只影响未来的规则集合，历史版本与历史报告保持不变 */
@@ -316,14 +335,17 @@ public class RuleService {
             .toList();
     }
 
-    private RuleResponse toResponse(AuditRule rule) {
-        AuditRuleVersion version = versionMapper.selectOne(new LambdaQueryWrapper<AuditRuleVersion>()
+    private AuditRuleVersion currentVersion(AuditRule rule) {
+        return versionMapper.selectOne(new LambdaQueryWrapper<AuditRuleVersion>()
             .eq(AuditRuleVersion::getRuleId, rule.getId())
             .eq(AuditRuleVersion::getVersion, rule.getCurrentVersion()));
-        return toResponse(rule, version);
     }
 
-    private RuleResponse toResponse(AuditRule rule, AuditRuleVersion version) {
+    private RuleResponse toResponse(AuditRule rule) {
+        return toResponse(rule, currentVersion(rule), legalClauseService.clausesOfRule(rule.getId()));
+    }
+
+    private RuleResponse toResponse(AuditRule rule, AuditRuleVersion version, List<LegalClauseResponse> legalClauses) {
         return new RuleResponse(
             rule.getId(),
             rule.getCode(),
@@ -340,7 +362,8 @@ public class RuleService {
             version == null ? 0 : version.getDeduct(),
             Boolean.TRUE.equals(rule.getEnabled()),
             rule.getCreatedAt(),
-            rule.getUpdatedAt()
+            rule.getUpdatedAt(),
+            legalClauses == null ? List.of() : legalClauses
         );
     }
 

@@ -15,6 +15,7 @@ import com.diting.mapper.ReportVersionMapper;
 import com.diting.mapper.SentenceMapper;
 import com.diting.mapper.SpeakerMappingMapper;
 import com.diting.mapper.ViolationMapper;
+import com.diting.service.rules.LegalClauseService;
 import com.diting.service.rules.RuleMatchService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.diting.service.rules.RuleModels;
@@ -48,19 +49,22 @@ public class ReportService {
     private final ViolationMapper violationMapper;
     private final SentenceMapper sentenceMapper;
     private final RuleService ruleService;
+    private final LegalClauseService legalClauseService;
     private final ReportAnalysisService analysisService;
     private final RecognitionTaskMapper taskMapper;
     private final ObjectMapper json;
 
     public ReportService(SpeakerMappingMapper speakerMappingMapper, ReportVersionMapper reportVersionMapper,
                          ViolationMapper violationMapper, SentenceMapper sentenceMapper,
-                         RuleService ruleService, ReportAnalysisService analysisService,
+                         RuleService ruleService, LegalClauseService legalClauseService,
+                         ReportAnalysisService analysisService,
                          RecognitionTaskMapper taskMapper, ObjectMapper json) {
         this.speakerMappingMapper = speakerMappingMapper;
         this.reportVersionMapper = reportVersionMapper;
         this.violationMapper = violationMapper;
         this.sentenceMapper = sentenceMapper;
         this.ruleService = ruleService;
+        this.legalClauseService = legalClauseService;
         this.analysisService = analysisService;
         this.taskMapper = taskMapper;
         this.json = json;
@@ -257,6 +261,10 @@ public class ReportService {
         List<Violation> violations = version == null ? List.of() : violationsOf(version.getId());
         Map<Long, RuleService.RuleVersionInfo> ruleInfo = version == null ? Map.of()
             : ruleService.ruleVersions(violations.stream().map(Violation::getRuleVersionId).distinct().toList());
+        // 法律条款按规则实时读取（V13）：绑定改了，历史报告重读时展示的是当前绑定
+        Map<Long, List<com.diting.dto.LegalClauseResponse>> clauseInfo = version == null ? Map.of()
+            : legalClauseService.clausesByRuleVersionIds(
+                violations.stream().map(Violation::getRuleVersionId).distinct().toList());
         Map<Integer, String> roles = version == null ? currentRoles(task.getId())
             : rolesAt(task.getId(), version.getMappingRevision());
         boolean rolesConfirmed = !roles.isEmpty();
@@ -277,7 +285,8 @@ public class ReportService {
                 info == null ? null : info.matchType(),
                 info == null ? null : info.roleScope(),
                 item.getSentenceId(), item.getTriggerSentenceId(),
-                readLongs(item.getEvidenceSentenceIds()), ranges, item.getDeduct(), item.getNote()));
+                readLongs(item.getEvidenceSentenceIds()), ranges, item.getDeduct(), item.getNote(),
+                clauseInfo.getOrDefault(item.getRuleVersionId(), List.of())));
             for (com.diting.dto.ViolationResponse.SentenceRange range : ranges) {
                 if (range.sentenceId() == null) {
                     continue;

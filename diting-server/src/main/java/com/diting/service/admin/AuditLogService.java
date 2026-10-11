@@ -36,6 +36,11 @@ public class AuditLogService {
     public static final String ACTION_TASK_DELETE = "TASK_DELETE";
     public static final String ACTION_REPORT_REANALYZE = "REPORT_REANALYZE";
     public static final String ACTION_ERASE_ALL = "ERASE_ALL";
+    /** 法律条款库（V13）：新增/编辑/停用，以及规则绑定条款（不生成规则新版本） */
+    public static final String ACTION_LEGAL_CLAUSE_CREATE = "LEGAL_CLAUSE_CREATE";
+    public static final String ACTION_LEGAL_CLAUSE_UPDATE = "LEGAL_CLAUSE_UPDATE";
+    public static final String ACTION_LEGAL_CLAUSE_DISABLE = "LEGAL_CLAUSE_DISABLE";
+    public static final String ACTION_RULE_LEGAL_CLAUSE_BIND = "RULE_LEGAL_CLAUSE_BIND";
 
     public static final String RESULT_SUCCESS = "SUCCESS";
     public static final String RESULT_DENIED = "DENIED";

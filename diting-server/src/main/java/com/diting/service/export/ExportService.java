@@ -334,6 +334,17 @@ public class ExportService {
                 ReportPdfRenderer.Span.red("● "),
                 ReportPdfRenderer.Span.of("%s 规则《%s》扣 %d：%s".formatted(
                     violation.matchType(), violation.ruleName(), violation.deduct(), note)))));
+            // 规则当前绑定的法律条款（V13）：作为「相关依据」随命中项展示
+            for (var clause : violation.legalClauses() == null ? List.<com.diting.dto.LegalClauseResponse>of()
+                : violation.legalClauses()) {
+                String law = clause.lawName() == null ? "" : clause.lawName();
+                if (!law.startsWith("《")) {
+                    law = "《" + law + "》";
+                }
+                evidenceLines.add(ReportPdfRenderer.Line.body("    依据：%s%s %s".formatted(
+                    law, clause.articleNo() == null ? "" : clause.articleNo(),
+                    clause.content() == null ? "" : clause.content())));
+            }
         }
         List<ReportPdfRenderer.Section> sections = new ArrayList<>();
         sections.add(new ReportPdfRenderer.Section("逐句判读", sentenceLines));

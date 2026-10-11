@@ -207,7 +207,7 @@ public class AdminRecordingController {
             .map(v -> new com.diting.dto.ViolationResponse(v.id(), v.ruleVersionId(),
                 RedactionService.redact(v.ruleName()), v.matchType(), v.scope(), v.sentenceId(),
                 v.triggerSentenceId(), v.evidenceSentenceIds(), v.ranges(), v.deduct(),
-                RedactionService.redact(v.note())))
+                RedactionService.redact(v.note()), v.legalClauses()))
             .toList();
         return new ReportDetailResponse(detail.id(), detail.taskId(), detail.reportNo(), detail.taskStatus(),
             detail.durationSec(), detail.createdAt(), detail.reportVersionId(), detail.reportVersion(),

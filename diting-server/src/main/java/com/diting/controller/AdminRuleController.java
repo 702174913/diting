@@ -5,8 +5,10 @@ import com.diting.common.PageQuery;
 import com.diting.common.PageResult;
 import com.diting.common.R;
 import com.diting.config.RequireRole;
+import com.diting.dto.LegalClauseResponse;
 import com.diting.dto.RuleImportApply;
 import com.diting.dto.RuleImportPrecheck;
+import com.diting.dto.RuleLegalClauseBindRequest;
 import com.diting.dto.RuleResponse;
 import com.diting.dto.RuleSaveRequest;
 import com.diting.service.rules.RuleImportService;
@@ -133,6 +135,23 @@ public class AdminRuleController {
         RuleResponse disabled = ruleService.setEnabled(id, false);
         audit("RULE_DISABLE", disabled);
         return R.ok(disabled);
+    }
+
+    /**
+     * 绑定法律条款（V13）：替换式提交，空数组解绑全部。
+     * 绑定实时生效、不生成规则新版本，故不参与 expectedVersion 乐观锁。
+     */
+    @PutMapping("/{id}/legal-clauses")
+    @RequireRole(AdminRole.ADMIN)
+    public R<List<LegalClauseResponse>> bindLegalClauses(@PathVariable Long id,
+                                                         @Valid @RequestBody RuleLegalClauseBindRequest req) {
+        List<LegalClauseResponse> bound = ruleService.bindLegalClauses(id, req.clauseIds());
+        var actor = com.diting.config.LoginUserHolder.get();
+        auditLogService.success(actor.domain().name(), actor.id(), AuditLogService.ACTION_RULE_LEGAL_CLAUSE_BIND,
+            "AUDIT_RULE", String.valueOf(id), AuditLogService.detail(
+                "clauseCount", bound.size(),
+                "clauseIds", bound.stream().map(LegalClauseResponse::id).toList()));
+        return R.ok(bound);
     }
 
     /** 规则变更留痕：只记编码/版本/扣分这类元数据，不记关键词以外的自由文本 */

@@ -20,6 +20,12 @@ public record RuleResponse(
     Integer deduct,
     boolean enabled,
     LocalDateTime createdAt,
-    LocalDateTime updatedAt
+    LocalDateTime updatedAt,
+    /**
+     * 绑定的法律条款（V13）。绑定按规则（非版本）存储、实时生效：
+     * 仅 get/list/create/update 返回当前绑定；版本历史接口恒为空列表，
+     * 避免把「当前绑定」误读为「历史版本快照」。
+     */
+    List<LegalClauseResponse> legalClauses
 ) {
 }
