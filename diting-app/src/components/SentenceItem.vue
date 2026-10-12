@@ -5,11 +5,12 @@
  * 命中只报规则名：依据是原文里的高亮片段，规则库的匹配词不外显（见 utils/reportNotes）。
  */
 import { computed } from 'vue'
-import type { Sentence } from '@/types/api'
+import ClauseList from '@/components/ClauseList.vue'
+import type { ReportLegalClause, Sentence } from '@/types/api'
 import { formatClock } from '@/utils/format'
 import { displaySentenceNote } from '@/utils/reportNotes'
 
-const props = defineProps<{ sentence: Sentence, sourceLabel?: string }>()
+const props = defineProps<{ sentence: Sentence, sourceLabel?: string, clauses?: ReportLegalClause[] }>()
 
 const speakerLabel = computed(() => {
   const { speakerId, sourceAssetId } = props.sentence
@@ -54,5 +55,6 @@ const parts = computed(() => {
       <text v-for="(part, index) in parts" :key="index" :class="{ 'f-hl': part.hit }">{{ part.text }}</text>
     </text>
     <text v-for="(note, index) in sentence.notes" :key="`n-${index}`" class="f-note">{{ displaySentenceNote(note) }}</text>
+    <ClauseList :clauses="clauses" />
   </view>
 </template>

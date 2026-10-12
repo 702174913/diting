@@ -17,6 +17,7 @@ import {
   LayoutDashboardIcon,
   LogOutIcon,
   MicIcon,
+  ScaleIcon,
   ShieldCheckIcon,
   SlidersHorizontalIcon,
   UsersIcon,
@@ -64,6 +65,7 @@ const groups: { title: string, items: MenuItem[] }[] = [
     title: '治理',
     items: [
       { key: 'rules', title: '规则库', tag: '可写', icon: BookTextIcon },
+      { key: 'legal-clauses', title: '条款库', tag: '可写', icon: ScaleIcon },
       { key: 'settings', title: '策略设置', icon: SlidersHorizontalIcon },
       { key: 'agreements', title: '协议配置', tag: '可写', icon: FileTextIcon },
       { key: 'audit', title: '权限与审计', tag: '敏感', icon: FileLockIcon },

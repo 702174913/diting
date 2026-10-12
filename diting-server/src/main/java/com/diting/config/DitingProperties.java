@@ -21,6 +21,7 @@ public class DitingProperties {
     private Pipeline pipeline = new Pipeline();
     private Export export = new Export();
     private Retention retention = new Retention();
+    private Startup startup = new Startup();
 
     /**
      * 媒体边界（开发文档 §11「媒体」）：真实支持范围由 POC 决定，
@@ -218,6 +219,25 @@ public class DitingProperties {
         private boolean allowHttpResult = true;
         /** 允许 http 的域名后缀（逗号分隔） */
         private String httpResultHostSuffixes = "aliyuncs.com";
+        }
+    }
+
+    /**
+     * 启动自检（fail-fast）：库结构落后于代码时拒绍启动，而不是等第一次请求才 500。
+     * 背景：V12/V13 曾长期「脚本已备好、未在库上执行」，缺表只在运行期暴露为 500。
+     */
+    @Data
+    public static class Startup {
+
+        private SchemaCheck schemaCheck = new SchemaCheck();
+
+        @Data
+        public static class SchemaCheck {
+            /**
+             * 是否在启动时核对迁移台账与关键对象。默认开启；
+             * 只有明确知道自己在对着残缺库排障时才关（关掉可能运行期才报错）。
+             */
+            private boolean enabled = true;
         }
     }
 }

@@ -39,6 +39,12 @@ diting:
   admin:
     init-username: ${DITING_ADMIN_INIT_USERNAME:}
     init-password: ${DITING_ADMIN_INIT_PASSWORD:}
+  # 启动自检：核对迁移台账（schema_migrations）与关键表/列/索引，缺了就拒绝启动，
+  # 避免「启动看着正常、第一次请求才 500」。只读 information_schema，不执行任何 DDL。
+  # 库结构确实残缺、只做临时排障时可设 false 跳过（有风险：可能运行期才报错）。
+  startup:
+    schema-check:
+      enabled: ${DITING_STARTUP_SCHEMA_CHECK:true}
   wechat:
     appid: 请替换
     secret: 请替换

@@ -42,6 +42,8 @@ class LegalClauseServiceTest {
     private final List<RuleLegalClause> bindings = new ArrayList<>();
     private final AtomicLong idSeq = new AtomicLong(500);
     private LegalClauseService service;
+    private com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<LegalClause> lastUpdate;
+    private Runnable beforeUpdate;
 
     @BeforeEach
     void setUp() {
@@ -55,6 +57,8 @@ class LegalClauseServiceTest {
         versions.clear();
         bindings.clear();
         idSeq.set(500);
+        lastUpdate = null;
+        beforeUpdate = () -> {};
 
         AuditRule rule = new AuditRule();
         rule.setId(5L);
@@ -74,9 +78,27 @@ class LegalClauseServiceTest {
             return 1;
         });
         when(clauseMapper.selectById(any())).thenAnswer(inv -> clauses.get(inv.getArgument(0)));
-        when(clauseMapper.updateById(any(LegalClause.class))).thenAnswer(inv -> {
-            LegalClause row = inv.getArgument(0);
-            clauses.put(row.getId(), row);
+        when(clauseMapper.update(org.mockito.ArgumentMatchers.isNull(),
+            any(com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper.class))).thenAnswer(inv -> {
+            lastUpdate = inv.getArgument(1);
+            lastUpdate.getSqlSegment();
+            beforeUpdate.run();
+            // 按实际 SQL SET 更新，不能把整行替换桩当成数据库更新语义。
+            var assignments = new HashMap<String, Object>();
+            for (String set : lastUpdate.getSqlSet().split(",")) {
+                String column = set.substring(0, set.indexOf('='));
+                var param = java.util.regex.Pattern.compile("MPGENVAL\\d+").matcher(set);
+                assertThat(param.find()).isTrue();
+                assignments.put(column, lastUpdate.getParamNameValuePairs().get(param.group()));
+            }
+            var idParam = java.util.regex.Pattern.compile("MPGENVAL\\d+")
+                .matcher(lastUpdate.getSqlSegment());
+            assertThat(idParam.find()).isTrue();
+            var row = clauses.get(lastUpdate.getParamNameValuePairs().get(idParam.group()));
+            var meta = org.apache.ibatis.reflection.SystemMetaObject.forObject(row);
+            var table = com.baomidou.mybatisplus.core.metadata.TableInfoHelper.getTableInfo(LegalClause.class);
+            table.getFieldList().stream().filter(field -> assignments.containsKey(field.getColumn()))
+                .forEach(field -> meta.setValue(field.getProperty(), assignments.get(field.getColumn())));
             return 1;
         });
         // 唯一性检查：wrapper 的两个 eq 是 lawName + articleNo，按参数值匹配
@@ -173,6 +195,51 @@ class LegalClauseServiceTest {
         LegalClauseResponse disabled = service.setEnabled(created.id(), false);
         assertThat(disabled.enabled()).isFalse();
         assertThat(clauses).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("编辑空备注：SQL 显式 SET remark=NULL，重新查询仍为空")
+    void clearsRemarkInSql() {
+        var created = service.create(new LegalClauseSaveRequest("民法典", "第一条", "原文", "旧备注", null));
+        for (String remark : java.util.Arrays.asList("", "   ", null)) {
+            clauses.get(created.id()).setRemark("旧备注");
+            var updated = service.update(created.id(),
+                new LegalClauseSaveRequest("民法典", "第一条", "新原文", remark, null));
+            assertThat(lastUpdate.getSqlSet()).contains("remark=").doesNotContain("enabled=");
+            assertThat(updated.remark()).isNull();
+            assertThat(service.get(created.id()).remark()).isNull();
+        }
+    }
+
+    @Test
+    @DisplayName("未提交 enabled 的文本编辑不覆盖并发停用，显式提交仍可启用")
+    void textEditPreservesConcurrentDisableUnlessExplicitlyEnabled() {
+        var created = create("民法典", "第一条", "旧原文", null);
+        beforeUpdate = () -> clauses.get(created.id()).setEnabled(false);
+        var updated = service.update(created.id(),
+            new LegalClauseSaveRequest("民法典", "第一条", "新原文", null, null));
+        assertThat(lastUpdate.getSqlSet()).doesNotContain("enabled=");
+        assertThat(updated.enabled()).isFalse();
+        var enabled = service.update(created.id(),
+            new LegalClauseSaveRequest("民法典", "第一条", "新原文", null, true));
+        assertThat(lastUpdate.getSqlSet()).contains("enabled=");
+        assertThat(enabled.enabled()).isTrue();
+    }
+
+    @Test
+    @DisplayName("停用只更新状态，不覆盖读后并发编辑的原文和备注")
+    void disablePreservesConcurrentEdit() {
+        var created = create("民法典", "第一条", "旧原文", null);
+        beforeUpdate = () -> {
+            clauses.get(created.id()).setContent("并发保存的新原文");
+            clauses.get(created.id()).setRemark("并发保存的新备注");
+        };
+        var disabled = service.setEnabled(created.id(), false);
+        assertThat(lastUpdate.getSqlSet()).contains("enabled=", "updated_at=")
+            .doesNotContain("content=", "law_name=", "article_no=", "remark=");
+        assertThat(disabled.enabled()).isFalse();
+        assertThat(disabled.content()).isEqualTo("并发保存的新原文");
+        assertThat(service.get(created.id()).remark()).isEqualTo("并发保存的新备注");
     }
 
     @Test

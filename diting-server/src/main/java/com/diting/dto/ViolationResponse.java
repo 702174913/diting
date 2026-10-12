@@ -19,7 +19,7 @@ public record ViolationResponse(
     Integer deduct,
     String note,
     /** 该规则当前绑定的法律条款（V13）：绑定实时生效，非发布时快照 */
-    List<LegalClauseResponse> legalClauses
+    List<ReportLegalClauseResponse> legalClauses
 ) {
 
     /** 高亮区间：句子 id + 原文 UTF-16 起止（左闭右开） */

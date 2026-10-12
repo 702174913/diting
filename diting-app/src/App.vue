@@ -751,4 +751,55 @@ page {
   font-size: 13.5px;
   color: var(--ink-3);
 }
+
+/* ---------- 适用条款（命中项下折叠的条文） ---------- */
+.clause {
+  display: block;
+  margin-top: 8px;
+}
+
+.clause-t {
+  display: block;
+  font-size: 11.5px;
+  letter-spacing: 0.5px;
+  color: var(--ink-3);
+}
+
+.clause-row {
+  margin-top: 6px;
+  padding: 8px 10px;
+  background: var(--warm-soft);
+  border: 1px solid var(--warm-line);
+  border-radius: var(--r-sm);
+}
+
+.clause-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.clause-no {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 500;
+  color: #8a4a1f;
+}
+
+.clause-toggle {
+  flex-shrink: 0;
+  margin-left: 8px;
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+
+.clause-body {
+  display: block;
+  margin-top: 7px;
+  padding-top: 7px;
+  font-size: 12.5px;
+  line-height: 1.8;
+  color: var(--ink-2);
+  border-top: 1px dashed var(--warm-line);
+}
 </style>

@@ -16,6 +16,7 @@
  */
 import { onHide, onLoad, onShow, onUnload } from '@dcloudio/uni-app'
 import { computed, ref } from 'vue'
+import ClauseList from '@/components/ClauseList.vue'
 import SentenceItem from '@/components/SentenceItem.vue'
 import ReportOverview from '@/components/ReportOverview.vue'
 import ReportExportActions from '@/components/ReportExportActions.vue'
@@ -31,7 +32,7 @@ import { reportPresentation } from '@/utils/reportPresentation'
 import { requireH5Login } from '@/utils/h5Auth'
 import { createPolling } from '@/utils/polling'
 import { isFailed, needsPolling } from '@/utils/taskStatus'
-import type { AssetItem, ReportDetail, TaskStatus } from '@/types/api'
+import type { AssetItem, ReportDetail, ReportLegalClause, TaskStatus, Violation } from '@/types/api'
 import checkSage from '@/static/icons/check-sage.png'
 
 const userStore = useUserStore()
@@ -95,6 +96,35 @@ const callLevelViolations = computed(() => (report.value?.violations ?? []).filt
 const fullSentences = computed(() => report.value?.sentences ?? [])
 /** 问题页卡片数：通话级缺失项 + 命中句，与概览的「要留意」同一份句子口径 */
 const issueCount = computed(() => callLevelViolations.value.length + flaggedSentences.value.length)
+/**
+ * 句子级命中对应的条款：同一句可能命中多条规则，条款按 id 去重且保持服务端给的顺序。
+ * 条款是规则维度的，不是句子维度的 —— 这里只做「这句话因为哪些规则要留意」的归属。
+ */
+const clausesBySentenceId = computed(() => {
+  const map = new Map<number, ReportLegalClause[]>()
+  for (const violation of report.value?.violations ?? []) {
+    if (violation.sentenceId === null || violation.sentenceId === undefined) {
+      continue
+    }
+    const bucket = map.get(violation.sentenceId) ?? []
+    for (const clause of violation.legalClauses ?? []) {
+      if (!bucket.some(item => item.id === clause.id)) {
+        bucket.push(clause)
+      }
+    }
+    map.set(violation.sentenceId, bucket)
+  }
+  return map
+})
+/** 通话级命中（sentenceId 为空）的条款直接跟着卡片走；缺字段（旧服务端）当未绑定 */
+function clausesOf(violation: Violation) {
+  return violation.legalClauses ?? []
+}
+/** 任一处绑定了条款就要说明口径：条款按规则当前绑定展示，不以历史快照冒充 */
+const hasAnyClause = computed(() => (report.value?.violations ?? [])
+  .some(item => (item.legalClauses ?? []).length > 0))
+/** 问题 / 对话两个页签共用同一句口径，避免两处文案各自漂移 */
+const CLAUSE_DISCLAIMER = '适用条款为规则当前绑定，条文原文以现行有效版本为准；是否构成违规由受理方认定。'
 const originalsAvailable = computed(() => Boolean(report.value?.audioAvailable)
   || images.value.some(item => !item.purged && Boolean(item.url)))
 
@@ -542,7 +572,7 @@ onUnload(() => {
         </view>
       </view>
 
-      <!-- 已发布：问题（命中与缺失）/ 对话（完整原文）两个 Tab -->
+      <!-- 已发布：问题（命中与缺失）/ 对话（完整原文）两个 Tab；两个 Tab 里命中句都带适用条款（默认收起，展开才看条文原文） -->
       <template v-if="!waitingReport">
         <view class="tabs">
           <view
@@ -576,13 +606,18 @@ onUnload(() => {
             <text class="f-ts">通话级问题 · {{ item.ruleName || '规则缺失项' }}</text>
             <text class="f-note">{{ displayViolationNote(item.note) }}</text>
             <text v-if="item.deduct !== null" class="hint">规则扣分：{{ item.deduct }}</text>
+            <ClauseList :clauses="clausesOf(item)" />
           </view>
           <SentenceItem
             v-for="sentence in flaggedSentences"
             :key="sentence.id"
             :sentence="sentence"
+            :clauses="clausesBySentenceId.get(sentence.id) ?? []"
             :source-label="sourceLabelOf(sentence.sourceAssetId)"
           />
+          <text v-if="hasAnyClause" class="hint">
+            {{ CLAUSE_DISCLAIMER }}
+          </text>
           <view v-if="issueCount === 0" class="find pass">
             <text class="f-ts">
               本轮规则未检出问题
@@ -603,8 +638,12 @@ onUnload(() => {
             v-for="sentence in fullSentences"
             :key="`all-${sentence.id}`"
             :sentence="sentence"
+            :clauses="clausesBySentenceId.get(sentence.id) ?? []"
             :source-label="sourceLabelOf(sentence.sourceAssetId)"
           />
+          <text v-if="hasAnyClause" class="hint">
+            {{ CLAUSE_DISCLAIMER }}
+          </text>
           <view v-if="!sentenceCount" class="find">
             <text class="f-ts">
               没有可展示的原文

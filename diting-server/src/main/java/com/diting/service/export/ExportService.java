@@ -37,7 +37,8 @@ import java.util.zip.ZipOutputStream;
  *
  * 语义要点：
  * - 创建作业只登记（QUEUED），生成由调度器推进；**GET 只查状态，不触发副作用**；
- * - 同一 owner + 报告版本 + 选项若已有**仍有效**的产物，直接复用，不重复生成；
+ * - 无违规项的报告可复用同 owner + 版本 + 选项的有效产物；有违规项时重新生成，
+ *   因其法律依据是实时数据（即使当前未绑定，也可能随后新增绑定）；
  * - 含音频的 ZIP：原件已清理/过期直接拒绝；ZIP 有效期不晚于原件保留截止时间；
  * - 发布前复查墓碑：记录已删除时作业失败，不产出产物；
  * - 产物落对象存储，下载走短时预签名；审计只记「签发事实」，不记链接。
@@ -83,7 +84,10 @@ public class ExportService {
                             boolean withAudio) {
         RecognitionTask task = requireTask(taskId);
         assertVersionBelongsToTask(task, reportVersionId);
-        ExportJob reusable = findReusable(ownerDomain, ownerId, reportVersionId, withAudio);
+        // 法律依据不属于报告版本快照，旧 PDF/ZIP 不能凭 reportVersionId 判定内容未变。
+        // 保守地禁用所有含违规项报告的复用，覆盖原文编辑、换绑、新增绑定和全部解绑。
+        ExportJob reusable = reportService.violationsOf(reportVersionId).isEmpty()
+            ? findReusable(ownerDomain, ownerId, reportVersionId, withAudio) : null;
         if (reusable != null) {
             return reusable;
         }
@@ -311,13 +315,7 @@ public class ExportService {
         // 后台导出仅 ADMIN（与录音详情一致：ADMIN 看原文）；C 端本人看原文。
         // OPERATOR 调不到后台导出路由，故此处无需脱敏分支。
         boolean redact = false;
-        List<String> summary = new ArrayList<>();
-        summary.add("记录编号：" + detail.reportNo() + " · 版本 v" + detail.reportVersion()
-            + "（" + detail.status() + "）");
-        summary.add("命中 " + detail.flaggedCount() + " 句 · 违规 " + detail.violationCount()
-            + " 项 · 风险分 " + (detail.riskScore() == null ? "未发布" : detail.riskScore())
-            + "（阈值 " + detail.threshold() + "）");
-        summary.add("正文中红色文字为命中原话；未标红的部分没有命中本轮启用的规则。");
+        List<ReportPdfRenderer.Span> summary = summarySpans(task, detail, assets);
 
         List<ReportPdfRenderer.Line> sentenceLines = new ArrayList<>();
         for (var sentence : detail.sentences()) {
@@ -327,39 +325,108 @@ public class ExportService {
             String head = "[%d] %s | ".formatted(sentence.sequence(), role);
             sentenceLines.add(ReportPdfRenderer.Line.of(hitSpans(head, text, sentence.highlights())));
         }
-        List<ReportPdfRenderer.Line> evidenceLines = new ArrayList<>();
-        for (var violation : detail.violations()) {
-            String note = redact ? RedactionService.redact(violation.note()) : violation.note();
-            evidenceLines.add(ReportPdfRenderer.Line.of(List.of(
-                ReportPdfRenderer.Span.red("● "),
-                ReportPdfRenderer.Span.of("%s 规则《%s》扣 %d：%s".formatted(
-                    violation.matchType(), violation.ruleName(), violation.deduct(), note)))));
-            // 规则当前绑定的法律条款（V13）：作为「相关依据」随命中项展示
-            for (var clause : violation.legalClauses() == null ? List.<com.diting.dto.LegalClauseResponse>of()
-                : violation.legalClauses()) {
-                String law = clause.lawName() == null ? "" : clause.lawName();
-                if (!law.startsWith("《")) {
-                    law = "《" + law + "》";
-                }
-                evidenceLines.add(ReportPdfRenderer.Line.body("    依据：%s%s %s".formatted(
-                    law, clause.articleNo() == null ? "" : clause.articleNo(),
-                    clause.content() == null ? "" : clause.content())));
-            }
-        }
-        List<ReportPdfRenderer.Section> sections = new ArrayList<>();
+        List<ReportPdfRenderer.Section> sections = new ArrayList<>(violationSections(detail));
+        // 原文与版本信息仍保留为附录，商务正文不再被逐句转写打断。
         sections.add(new ReportPdfRenderer.Section("逐句判读", sentenceLines));
-        sections.add(new ReportPdfRenderer.Section("命中与依据", evidenceLines));
         List<ReportPdfRenderer.Line> imageLines = imageSectionLines(assets);
         if (!imageLines.isEmpty()) {
             sections.add(new ReportPdfRenderer.Section("图片清单", imageLines));
         }
-        List<String> footers = List.of(
-            "本服务仅记录通话内容，不构成法律意见，",
-            "不作为处理结果承诺。",
-            "所引规范条文请以现行有效版本为准。");
+        List<String> footers = List.of("所引规范条文请以现行有效版本为准。");
         return new ReportPdfRenderer.PdfReport(detail.reportNo(), BusinessTime.now().toString(),
             "报告版本 v" + detail.reportVersion() + " · 规则集合 version=" + detail.reportVersionId(),
-            String.join("\n", summary), sections, footers);
+            summary.stream().map(ReportPdfRenderer.Span::text).collect(java.util.stream.Collectors.joining()),
+            sections, footers, summary);
+    }
+
+    /** 包级可见：用真实 DTO 测试数据口径，不把模板中的示例数字当作业务数据。 */
+    static List<ReportPdfRenderer.Span> summarySpans(RecognitionTask task,
+        com.diting.dto.ReportDetailResponse detail, List<com.diting.entity.TaskAsset> assets) {
+        List<ReportPdfRenderer.Span> spans = new ArrayList<>();
+        long audioCount = assets.stream().filter(asset -> "AUDIO".equals(asset.getKind())).count();
+        if (audioCount == 0 && task.getOssObject() != null && !task.getOssObject().isBlank()) audioCount = 1;
+        long images = assets.stream().filter(com.diting.entity.TaskAsset::isImage).count();
+        spans.add(ReportPdfRenderer.Span.of("本次检测覆盖 "));
+        spans.add(ReportPdfRenderer.Span.blue(String.valueOf(audioCount)));
+        spans.add(ReportPdfRenderer.Span.of(" 段通话"));
+        if (images > 0) {
+            spans.add(ReportPdfRenderer.Span.of("、"));
+            spans.add(ReportPdfRenderer.Span.blue(String.valueOf(images)));
+            spans.add(ReportPdfRenderer.Span.of(" 张图片"));
+        }
+        if (audioCount > 0) {
+            Integer seconds = detail.durationSec();
+            spans.add(ReportPdfRenderer.Span.of("、合计 "));
+            spans.add(ReportPdfRenderer.Span.blue(seconds == null || seconds < 0 ? "时长未知"
+                : "%02d 分 %02d 秒".formatted(seconds / 60, seconds % 60)));
+        }
+        long rules = detail.violations().stream().map(com.diting.dto.ViolationResponse::ruleVersionId)
+            .filter(java.util.Objects::nonNull).distinct().count();
+        spans.add(ReportPdfRenderer.Span.of("，共命中 "));
+        spans.add(ReportPdfRenderer.Span.blue(String.valueOf(rules)));
+        spans.add(ReportPdfRenderer.Span.of(" 项规则，违规 "));
+        spans.add(ReportPdfRenderer.Span.blue(String.valueOf(detail.violationCount())));
+        spans.add(ReportPdfRenderer.Span.of(" 项，风险分 "));
+        String score = detail.riskScore() == null ? "未发布" : String.valueOf(detail.riskScore());
+        boolean highRisk = detail.riskScore() != null && detail.threshold() != null
+            && detail.riskScore() >= detail.threshold();
+        spans.add(highRisk ? ReportPdfRenderer.Span.red(score) : ReportPdfRenderer.Span.blue(score));
+        spans.add(ReportPdfRenderer.Span.of("（阈值 " + (detail.threshold() == null ? "未设置" : detail.threshold())
+            + "）。上述命中项系录音内容与平台规则库的形式比对结果，不代表对任何行为合法性的认定，亦不代表行为的违法程度。"));
+        return spans;
+    }
+
+    /** 每条证据生成一个违规点；依据来自规则的实时绑定，绝不推断或补造法律条文。 */
+    static List<ReportPdfRenderer.Section> violationSections(com.diting.dto.ReportDetailResponse detail) {
+        List<ReportPdfRenderer.Section> sections = new ArrayList<>();
+        int index = 0;
+        for (var violation : detail.violations()) {
+            List<ReportPdfRenderer.Line> lines = new ArrayList<>();
+            String type = switch (violation.matchType() == null ? "" : violation.matchType()) {
+                case "hit" -> "命中关键词";
+                case "must-have" -> "本通话中未出现必需表述";
+                case "require" -> "触发条件后未检测到必需回应";
+                default -> "规则比对";
+            };
+            lines.add(ReportPdfRenderer.Line.body("判定规则  " + type + "：《"
+                + (violation.ruleName() == null ? "未命名规则" : violation.ruleName()) + "》"
+                + "（扣分 " + (violation.deduct() == null ? "未提供" : violation.deduct()) + "）"));
+            var clauses = violation.legalClauses() == null
+                ? List.<com.diting.dto.ReportLegalClauseResponse>of() : violation.legalClauses();
+            if (clauses.isEmpty()) {
+                lines.add(new ReportPdfRenderer.Line(
+                    List.of(ReportPdfRenderer.Span.of("规则依据  本规则尚未绑定法律依据。")), ReportPdfRenderer.Style.MUTED));
+            }
+            for (var clause : clauses) {
+                String law = clause.lawName() == null ? "" : clause.lawName();
+                if (!law.isBlank() && !law.startsWith("《")) law = "《" + law + "》";
+                lines.add(ReportPdfRenderer.Line.body("规则依据  " + law
+                    + (clause.articleNo() == null ? "" : clause.articleNo())));
+                if (clause.content() != null && !clause.content().isBlank()) {
+                    lines.add(ReportPdfRenderer.Line.body("条文原文  " + clause.content()));
+                }
+            }
+            if (violation.note() != null && !violation.note().isBlank()) {
+                lines.add(ReportPdfRenderer.Line.body("证据说明  " + violation.note()));
+            } else {
+                lines.add(new ReportPdfRenderer.Line(
+                    List.of(ReportPdfRenderer.Span.of("（本违规点无附加说明）")), ReportPdfRenderer.Style.MUTED));
+            }
+            var ids = new java.util.LinkedHashSet<Long>();
+            if (violation.sentenceId() != null) ids.add(violation.sentenceId());
+            if (violation.triggerSentenceId() != null) ids.add(violation.triggerSentenceId());
+            if (violation.evidenceSentenceIds() != null) ids.addAll(violation.evidenceSentenceIds());
+            for (var sentence : detail.sentences()) {
+                if (!ids.contains(sentence.id())) continue;
+                var ranges = violation.ranges() == null ? List.<com.diting.dto.ViolationResponse.SentenceRange>of()
+                    : violation.ranges().stream().filter(range -> java.util.Objects.equals(range.sentenceId(), sentence.id())).toList();
+                lines.add(ReportPdfRenderer.Line.of(hitSpans("证据原话  [" + sentence.sequence() + "] ",
+                    sentence.text() == null ? "" : sentence.text(), ranges)));
+            }
+            lines.add(ReportPdfRenderer.Line.body("建议  客观提示，不针对本次事实定性：建议保留原始录音完整文件，勿剪辑；如需评估法律后果，建议咨询执业律师。"));
+            sections.add(new ReportPdfRenderer.Section("违规点 %02d".formatted(++index), lines, true));
+        }
+        return sections;
     }
 
     /**

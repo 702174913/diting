@@ -102,10 +102,16 @@ expect_eq "下载记一条签发审计" "1" "$(sqlv "SELECT COUNT(*) FROM audit_
 PDF_KEY=$(sqlv "SELECT artifact_key FROM export_jobs WHERE id=${EXPORT_PDF}")
 expect_eq "产物已落对象存储" "1" "$(sqlv "SELECT COUNT(*) FROM export_jobs WHERE id=${EXPORT_PDF} AND artifact_key IS NOT NULL")"
 
-# ---------- EXPORT-04 同版本同选项复用 ----------
+# ---------- EXPORT-04 实时法律依据与复用 ----------
+VIOLATION_COUNT=$(sqlv "SELECT COUNT(*) FROM violations WHERE report_version_id=${REPORT_VERSION_ID}")
 RESP=$(call POST "/api/report/${TASK_ID}/exports" "{\"reportVersionId\":${REPORT_VERSION_ID},\"withAudio\":false}" "$TOKEN")
-expect_eq "EXPORT-04-1 复用有效产物（同一作业）" "$EXPORT_PDF" "$(p | jq -r '.data.exportId')"
-expect_eq "EXPORT-04-2 未重复生成" "1" "$(sqlv "SELECT COUNT(*) FROM export_jobs WHERE report_version_id=${REPORT_VERSION_ID} AND with_audio=0")"
+if [ "$VIOLATION_COUNT" = "0" ]; then
+  expect_eq "EXPORT-04-1 无违规项复用有效产物（同一作业）" "$EXPORT_PDF" "$(p | jq -r '.data.exportId')"
+  expect_eq "EXPORT-04-2 无违规项未重复生成" "1" "$(sqlv "SELECT COUNT(*) FROM export_jobs WHERE report_version_id=${REPORT_VERSION_ID} AND with_audio=0")"
+else
+  expect_jq "EXPORT-04-1 含违规项重新排队，避免复用实时法律依据" ".data.status == \"QUEUED\" and .data.exportId != ${EXPORT_PDF}"
+  expect_eq "EXPORT-04-2 含违规项新建作业" "2" "$(sqlv "SELECT COUNT(*) FROM export_jobs WHERE report_version_id=${REPORT_VERSION_ID} AND with_audio=0")"
+fi
 
 # ---------- EXPORT-10 含音频 ZIP：内容与音频一致 ----------
 RESP=$(call POST "/api/report/${TASK_ID}/exports" "{\"reportVersionId\":${REPORT_VERSION_ID},\"withAudio\":true}" "$TOKEN")

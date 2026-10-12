@@ -37,6 +37,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '规则库' },
       },
       {
+        path: 'legal-clauses',
+        name: 'legal-clauses',
+        component: () => import('@/views/legal-clauses/index.vue'),
+        meta: { title: '条款库' },
+      },
+      {
         path: 'settings',
         name: 'settings',
         component: () => import('@/views/settings/index.vue'),

@@ -22,8 +22,8 @@ test('统一查询串正确编码名称、中文、0/false，忽略缺失和空�
   }
 })
 
-test('四张后台表格只由分页组件渲染页码，不重复显示', () => {
-  for (const view of ['accounts', 'audit', 'rules', 'recordings']) {
+test('五张后台表格只由分页组件渲染页码，不重复显示', () => {
+  for (const view of ['accounts', 'audit', 'rules', 'recordings', 'legal-clauses']) {
     const filename = path.join(root, `src/views/${view}/index.vue`)
     const { descriptor, errors } = parse(readFileSync(filename, 'utf8'))
     assert.equal(errors.length, 0, view)

@@ -49,6 +49,11 @@ export interface AdminViolation {
   ranges: SentenceRange[]
   deduct: number | null
   note: string
+  /**
+   * 该规则当前绑定的法律条款（V13），与 app 端详情同一份组装。
+   * 实时读取：改绑定后历史报告重读时看到的是新条款，不是发布时快照。
+   */
+  legalClauses: LegalClauseItem[]
 }
 
 export interface AdminReportDetail {
@@ -91,6 +96,12 @@ export interface RuleItem {
   windowSize: number | null
   deduct: number
   enabled: boolean
+  /**
+   * 当前绑定的法律条款（V13）。只在 get/list/create/update 返回；
+   * 版本历史接口恒为空数组 —— 绑定按规则（非版本）存储、实时生效，
+   * 拿它当「该版本发布时的依据快照」会读错。
+   */
+  legalClauses: LegalClauseItem[]
 }
 
 export interface PolicyConfig {
@@ -254,6 +265,79 @@ export function applyRuleImport(token: string, content: string) {
     url: '/api/admin/rules/import',
     method: 'POST',
     data: { content },
+    token,
+  })
+}
+
+/**
+ * 法律条款库（V13）：规则命中时随报告下发的「相关依据」。
+ * 读 {ADMIN, OPERATOR}；写仅 ADMIN。停用（DELETE）不物理删除 ——
+ * 已有绑定与历史报告引用不受影响，只是不能再被新绑定。
+ */
+export interface LegalClauseItem {
+  id: number
+  /** 法律/规范名称，如「个人信息保护法」 */
+  lawName: string
+  /** 条款号，如「第十三条」；与 lawName 组合唯一（重复保存服务端返回 409） */
+  articleNo: string
+  /** 条款原文：报告与 PDF 里原样展示 */
+  content: string
+  remark: string | null
+  enabled: boolean
+  createdAt: string | null
+  updatedAt: string | null
+}
+
+/** 新增/编辑条款的请求体；enabled 不传时：新建默认启用、编辑保持原状态 */
+export interface LegalClausePayload {
+  lawName: string
+  articleNo: string
+  content: string
+  remark?: string | null
+  enabled?: boolean
+}
+
+export function fetchLegalClauses(
+  token: string,
+  params: { page?: number, pageSize?: number, keyword?: string, enabled?: boolean } = {},
+) {
+  const query = buildQuery(params)
+  return request<Paged<LegalClauseItem>>({ url: `/api/admin/legal-clauses?${query}`, token })
+}
+
+export function createLegalClause(token: string, clause: LegalClausePayload) {
+  return request<LegalClauseItem>({
+    url: '/api/admin/legal-clauses',
+    method: 'POST',
+    data: { ...clause },
+    token,
+  })
+}
+
+export function updateLegalClause(token: string, id: number, clause: LegalClausePayload) {
+  return request<LegalClauseItem>({
+    url: `/api/admin/legal-clauses/${id}`,
+    method: 'PUT',
+    data: { ...clause },
+    token,
+  })
+}
+
+/** 停用条款：语义等同 DELETE，历史引用保留 */
+export function disableLegalClause(token: string, id: number) {
+  return request<LegalClauseItem>({ url: `/api/admin/legal-clauses/${id}`, method: 'DELETE', token })
+}
+
+/**
+ * 规则绑定条款：替换式提交，传空数组即解绑全部。
+ * 不生成规则新版本、不参与 expectedVersion 乐观锁（绑定实时生效）。
+ * 只接受「存在且启用」的条款 id，混入停用条款会被 422 整单拒绝。
+ */
+export function bindRuleLegalClauses(token: string, ruleId: number, clauseIds: number[]) {
+  return request<LegalClauseItem[]>({
+    url: `/api/admin/rules/${ruleId}/legal-clauses`,
+    method: 'PUT',
+    data: { clauseIds },
     token,
   })
 }

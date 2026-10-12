@@ -58,6 +58,14 @@ export interface Sentence {
   notes: string[]
 }
 
+/** 命中规则绑定的法律条款（V13）：服务端按规则当前绑定实时读取，不是发布时的快照 */
+export interface ReportLegalClause {
+  id: number
+  lawName: string
+  articleNo: string
+  content: string
+}
+
 /** 一条命中/缺失证据：引用规则版本，带原文高亮 */
 export interface Violation {
   id: number
@@ -71,6 +79,8 @@ export interface Violation {
   ranges: SentenceRange[]
   deduct: number | null
   note: string
+  /** 该规则当前绑定的条款；未绑定为空数组 */
+  legalClauses: ReportLegalClause[]
 }
 
 export interface SpeakerRole {

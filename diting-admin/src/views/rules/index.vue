@@ -6,8 +6,10 @@
  * 历史版本与历史报告不动。这里不做独立的「模型管理」页：模型组就是规则的分组字段。
  *
  * 查看与写入全部走弹窗：新增/修改（rule-editor-dialog）、详情与版本历史
- * （rule-history-dialog）、批量导入（rule-import-dialog）、停用确认（AlertDialog）、
- * 当前规则集快照（本页内联，只读）。
+ * （rule-history-dialog）、批量导入（rule-import-dialog）、绑定法律条款
+ * （rule-clause-bind-dialog）、停用确认（AlertDialog）、当前规则集快照（本页内联，只读）。
+ *
+ * 「法律依据」列是绑定条款的入口：绑定按规则存储、实时生效，不生成新版本。
  */
 import type { ColumnDef } from '@tanstack/vue-table'
 import {
@@ -17,10 +19,12 @@ import {
   PackageIcon,
   PencilIcon,
   PlusIcon,
+  ScaleIcon,
   UploadIcon,
 } from '@lucide/vue'
 import { h, onMounted, ref } from 'vue'
 import { toast } from 'vue-sonner'
+import RuleClauseBindDialog from './rule-clause-bind-dialog.vue'
 import RuleEditorDialog from './rule-editor-dialog.vue'
 import RuleHistoryDialog from './rule-history-dialog.vue'
 import RuleImportDialog from './rule-import-dialog.vue'
@@ -81,6 +85,9 @@ const historyOpen = ref(false)
 const historyRule = ref<RuleItem | null>(null)
 const importOpen = ref(false)
 
+const bindOpen = ref(false)
+const bindingRule = ref<RuleItem | null>(null)
+
 const disableOpen = ref(false)
 const disablingRule = ref<RuleItem | null>(null)
 const disabling = ref(false)
@@ -137,6 +144,16 @@ function startEdit(rule: RuleItem) {
 function openHistory(rule: RuleItem) {
   historyRule.value = rule
   historyOpen.value = true
+}
+
+function openBind(rule: RuleItem) {
+  bindingRule.value = rule
+  bindOpen.value = true
+}
+
+/** 绑定条数：服务端在 get/list/create/update 都返回，历史版本接口恒为空 */
+function clauseCount(rule: RuleItem) {
+  return rule.legalClauses?.length ?? 0
 }
 
 function askDisable(rule: RuleItem) {
@@ -211,6 +228,23 @@ const columns: ColumnDef<RuleItem>[] = [
       Badge,
       { variant: row.original.enabled ? 'up' : 'secondary', size: 'chip' },
       () => (row.original.enabled ? '启用' : '已停用'),
+    ),
+  },
+  {
+    id: 'legalClauses',
+    header: '法律依据',
+    // 绑定入口就放在数据里：ADMIN 点条数直接进绑定弹窗，其他人只读
+    cell: ({ row }) => h(
+      isAdmin
+        ? Button
+        : 'span',
+      isAdmin
+        ? { variant: 'ghost', size: 'sm', class: '-ml-2', onClick: () => openBind(row.original) }
+        : { class: 'text-muted-foreground' },
+      () => [
+        isAdmin ? h(ScaleIcon, { 'data-icon': 'inline-start' }) : null,
+        clauseCount(row.original) > 0 ? `${clauseCount(row.original)} 条` : (isAdmin ? '未绑定' : '—'),
+      ],
     ),
   },
   {
@@ -327,6 +361,12 @@ onMounted(load)
     <RuleImportDialog
       v-model:open="importOpen"
       @imported="load()"
+    />
+
+    <RuleClauseBindDialog
+      v-model:open="bindOpen"
+      :rule="bindingRule"
+      @saved="load()"
     />
 
     <AlertDialog v-model:open="disableOpen">

@@ -466,6 +466,13 @@ interface Sentence {
   notes: string[]
 }
 
+interface ReportLegalClause {
+  id: number
+  lawName: string
+  articleNo: string
+  content: string
+}
+
 interface Violation {
   id: number
   ruleVersionId: number
@@ -478,6 +485,9 @@ interface Violation {
   ranges: SentenceRange[]
   deduct: number | null
   note: string
+  // 命中规则当前绑定的条款；未绑定为空数组。
+  // 注意：按规则实时读取，不是发布时的快照 —— 绑定改了，历史记录重读时看到的是新条款。
+  legalClauses: ReportLegalClause[]
 }
 
 interface SpeakerRole {

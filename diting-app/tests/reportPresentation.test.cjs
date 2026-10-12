@@ -104,7 +104,7 @@ test('报告页面脚本与模板可编译且实际绑定发布守卫/通话级�
   assert.match(vue, /<ReportExportActions[\s\S]*?@save="save"/)
   assert.match(actions, /:disabled="exporting \|\| waitingReport"/)
   assert.match(actions, /:disabled="exporting \|\| waitingReport \|\| !originalsAvailable"/)
-  for (const child of ['ReportOverview', 'ReportExportActions']) {
+  for (const child of ['ReportOverview', 'ReportExportActions', 'ClauseList', 'SentenceItem']) {
     const pathToChild = path.join(__dirname, `../src/components/${child}.vue`)
     const { descriptor, errors } = parse(fs.readFileSync(pathToChild, 'utf8'), { filename: pathToChild })
     assert.equal(errors.length, 0)
@@ -117,4 +117,52 @@ test('报告页面脚本与模板可编译且实际绑定发布守卫/通话级�
     })
     assert.equal(compiled.errors.length, 0)
   }
+})
+
+test('命中项下的适用条款：默认只列条款号，点开才看条文原文', () => {
+  const types = fs.readFileSync(path.join(__dirname, '../src/types/api.ts'), 'utf8')
+  // 服务端在 app 详情里一直在返（admin 详情与 app 详情同一份组装），前端类型此前漏了
+  assert.match(types, /export interface Violation \{[\s\S]*?legalClauses: ReportLegalClause\[\]/)
+
+  const clauseList = fs.readFileSync(path.join(__dirname, '../src/components/ClauseList.vue'), 'utf8')
+  // 折叠默认收起：状态是空数组，条文原文只在展开后渲染
+  assert.match(clauseList, /const openIds = ref<number\[\]>\(\[\]\)/)
+  assert.match(clauseList, /@click="toggle\(clause\.id\)"/)
+  assert.match(clauseList, /v-if="openIds\.includes\(clause\.id\)"[\s\S]*?\{\{ clause\.content \}\}/)
+  // 条款号口径：法规名缺书名号时补上（与后台详情、PDF 导出件一致）
+  assert.match(clauseList, /law\.startsWith\('《'\) \? `《\$\{law\}》` : law/)
+
+  const sentenceItem = fs.readFileSync(path.join(__dirname, '../src/components/SentenceItem.vue'), 'utf8')
+  assert.match(sentenceItem, /clauses\?: ReportLegalClause\[\]/)
+  assert.match(sentenceItem, /<ClauseList :clauses="clauses" \/>/)
+
+  const filename = path.join(__dirname, '../src/pages/report/detail.vue')
+  const vue = fs.readFileSync(filename, 'utf8')
+  // 句子级命中：按命中句聚合条款（同一句命中多条规则时按 id 去重）
+  assert.match(vue, /const clausesBySentenceId = computed\(\(\) => \{/)
+  assert.match(vue, /if \(!bucket\.some\(item => item\.id === clause\.id\)\) \{/)
+  assert.match(vue, /:clauses="clausesBySentenceId\.get\(sentence\.id\) \?\? \[\]"/)
+  // 通话级命中（sentenceId 为空）的条款跟着卡片走
+  assert.match(vue, /function clausesOf\(violation: Violation\)/)
+  assert.match(vue, /<ClauseList :clauses="clausesOf\(item\)" \/>/)
+  // 口径两个页签共用同一句：条款按规则当前绑定，不是发布时快照
+  assert.match(vue, /const CLAUSE_DISCLAIMER = '适用条款为规则当前绑定，条文原文以现行有效版本为准；是否构成违规由受理方认定。'/)
+  assert.equal((vue.match(/v-if="hasAnyClause"/g) || []).length, 2)
+  assert.equal((vue.match(/\{\{ CLAUSE_DISCLAIMER \}\}/g) || []).length, 2)
+  // 条款既进问题页也进「对话」页：对话页是完整原文，命中句同样要能看到适用条款
+  assert.equal((vue.match(/:clauses=/g) || []).length, 3)
+  assert.match(vue, /v-for="sentence in fullSentences"[\s\S]{0,300}?:clauses="clausesBySentenceId\.get\(sentence\.id\) \?\? \[\]"/)
+
+  const parsed = parse(vue, { filename })
+  assert.equal(parsed.errors.length, 0)
+  const script = compileScript(parsed.descriptor, { id: 'report-clauses' })
+  const template = compileTemplate({
+    source: parsed.descriptor.template.content,
+    filename,
+    id: 'report-clauses',
+    compilerOptions: { bindingMetadata: script.bindings },
+  })
+  assert.equal(template.errors.length, 0)
+  assert.ok(script.bindings.clausesBySentenceId)
+  assert.ok(script.bindings.hasAnyClause)
 })

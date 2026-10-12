@@ -1,6 +1,7 @@
 package com.diting.service.rules;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.diting.common.BizException;
 import com.diting.common.BusinessTime;
@@ -100,26 +101,28 @@ public class LegalClauseService {
         String lawName = req.lawName().trim();
         String articleNo = req.articleNo().trim();
         assertUnique(lawName, articleNo, id);
-        clause.setLawName(lawName);
-        clause.setArticleNo(articleNo);
-        clause.setContent(req.content().trim());
-        clause.setRemark(blankToNull(req.remark()));
-        if (req.enabled() != null) {
-            clause.setEnabled(req.enabled());
-        }
-        clause.setUpdatedAt(BusinessTime.now());
-        clauseMapper.updateById(clause);
-        return toResponse(clause);
+        // 显式 SET 保证空备注写入 NULL；未提交 enabled 时不覆盖并发启停。
+        clauseMapper.update(null, new LambdaUpdateWrapper<LegalClause>()
+            .eq(LegalClause::getId, clause.getId())
+            .set(LegalClause::getLawName, lawName)
+            .set(LegalClause::getArticleNo, articleNo)
+            .set(LegalClause::getContent, req.content().trim())
+            .set(LegalClause::getRemark, blankToNull(req.remark()))
+            .set(req.enabled() != null, LegalClause::getEnabled, req.enabled())
+            .set(LegalClause::getUpdatedAt, BusinessTime.now()));
+        return get(id);
     }
 
     /** 停用/启用：已有绑定与历史报告引用不变 */
     @Transactional
     public LegalClauseResponse setEnabled(Long id, boolean enabled) {
-        LegalClause clause = requireClause(id);
-        clause.setEnabled(enabled);
-        clause.setUpdatedAt(BusinessTime.now());
-        clauseMapper.updateById(clause);
-        return toResponse(clause);
+        requireClause(id);
+        // 只改状态，不能把读到的旧原文、法规名或备注回写覆盖并发编辑。
+        clauseMapper.update(null, new LambdaUpdateWrapper<LegalClause>()
+            .eq(LegalClause::getId, id)
+            .set(LegalClause::getEnabled, enabled)
+            .set(LegalClause::getUpdatedAt, BusinessTime.now()));
+        return get(id);
     }
 
     /**

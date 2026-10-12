@@ -11,7 +11,7 @@
  * 页面只负责呈现：真正的权限判断在服务端，看不到的按钮即使被改出来也会被 403。
  */
 import type { ColumnDef } from '@tanstack/vue-table'
-import { BanIcon, DownloadIcon, FileDownIcon, ImageIcon, MicIcon, PackageIcon, RefreshCwIcon } from '@lucide/vue'
+import { BanIcon, ChevronDownIcon, DownloadIcon, FileDownIcon, ImageIcon, MicIcon, PackageIcon, RefreshCwIcon } from '@lucide/vue'
 import { computed, h, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
@@ -72,7 +72,7 @@ import {
 import { displaySentenceNote } from '@/lib/recordingNotes'
 import { useExportTaskStore } from '@/stores/exportTask'
 import { useUserStore } from '@/stores/user'
-import type { AdminReportDetail, AssetItem, RecordingItem } from '@/api/admin'
+import type { AdminReportDetail, AdminViolation, AssetItem, LegalClauseItem, RecordingItem } from '@/api/admin'
 
 const userStore = useUserStore()
 const exportStore = useExportTaskStore()
@@ -114,6 +114,8 @@ const reanalyzing = ref(false)
 const deleteOpen = ref(false)
 const deleting = ref(false)
 const activeTab = ref('transcript')
+/** 展开条文原文的条款 id：按条款记而不是按命中点记，同一条款在多个命中里状态一致 */
+const openClauseIds = ref<number[]>([])
 
 const isAdmin = computed(() => userStore.role === 'ADMIN')
 
@@ -421,6 +423,24 @@ function violationSentence(violation: { sentenceId: number | null, triggerSenten
   return detail.value?.sentences.find(item => item.id === id) ?? null
 }
 
+/** 命中绑定的条款：缺字段（旧服务端）当未绑定处理，不让详情页因为多返字段而崩 */
+function clausesOf(violation: AdminViolation) {
+  return violation.legalClauses ?? []
+}
+
+/** 条款标题：《法规名》+ 条款号；法规名自带书名号时不重复加（与 PDF 导出件同一口径） */
+function clauseTitle(clause: LegalClauseItem) {
+  const law = clause.lawName ?? ''
+  const named = law && !law.startsWith('《') ? `《${law}》` : law
+  return `${named}${clause.articleNo ?? ''}`
+}
+
+function toggleClause(clauseId: number) {
+  openClauseIds.value = openClauseIds.value.includes(clauseId)
+    ? openClauseIds.value.filter(id => id !== clauseId)
+    : [...openClauseIds.value, clauseId]
+}
+
 /** 筛选下拉：界面用中文、提交的是英文码；reka-ui 不接受空字符串选项，用 ALL 当“全部”哨兵 */
 const statusFilter = computed({
   get: () => filters.value.status || 'ALL',
@@ -714,6 +734,9 @@ load()
           </TabsContent>
 
           <TabsContent value="evidence" class="max-h-[45vh] overflow-y-auto">
+            <p v-if="detail.violations.length" class="mb-2 text-xs text-muted-foreground">
+              适用条款按规则当前绑定实时读取：改绑定后，历史报告重读时显示的是新条款，不是发布时的快照。
+            </p>
             <div
               v-for="violation in detail.violations"
               :key="violation.id"
@@ -728,6 +751,29 @@ load()
               </div>
               <div class="mt-1 text-xs text-muted-foreground">
                 {{ violation.note }}
+              </div>
+              <div class="mt-1 text-xs text-muted-foreground">
+                适用条款
+                <template v-if="clausesOf(violation).length === 0">：未绑定（规则库「法律依据」列可绑定）</template>
+              </div>
+              <div v-for="clause in clausesOf(violation)" :key="clause.id" class="mt-1">
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-xs hover:bg-muted"
+                  @click="toggleClause(clause.id)"
+                >
+                  {{ clauseTitle(clause) }}
+                  <ChevronDownIcon
+                    class="size-3 transition-transform"
+                    :class="openClauseIds.includes(clause.id) ? 'rotate-180' : ''"
+                  />
+                </button>
+                <div
+                  v-if="openClauseIds.includes(clause.id)"
+                  class="mt-1 rounded bg-muted/60 px-2 py-1 text-xs text-muted-foreground"
+                >
+                  {{ clause.content }}
+                </div>
               </div>
               <div
                 v-if="violationSentence(violation)"

@@ -17,8 +17,8 @@ class AdminRecordingRedactionTest {
             phone, null, List.of(), List.of(), List.of("联系 " + phone));
         ViolationResponse violation = new ViolationResponse(2L, 3L, "规则 " + phone, "hit", "ALL",
             1L, null, List.of(), List.of(), 10, "命中 " + phone,
-            List.of(new com.diting.dto.LegalClauseResponse(7L, "个人信息保护法", "第十三条",
-                "条款原文", null, true, null, null)));
+            List.of(new com.diting.dto.ReportLegalClauseResponse(7L, "个人信息保护法", "第十三条",
+                "条款原文")));
         ReportDetailResponse detail = new ReportDetailResponse(1L, "remote", "DT-1", "COMPLETED",
             1, "now", 2L, 1, "PUBLISHED", "PUBLISHED", 0L, List.of(), false,
             1, 1, 1, 10, 90, 80, false, "now", false, false,

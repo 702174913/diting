@@ -427,7 +427,7 @@ class ReportServiceTest {
         sentences.add(sentence(1L, 1, 0, "保证免息。"));
         violations.add(violation(1L, 101L, 1L, 30, "命中《禁用承诺》"));
         var clause = new com.diting.dto.LegalClauseResponse(7L, "个人信息保护法", "第十三条",
-            "符合下列情形之一的，个人信息处理者方可处理个人信息……", null, true, null, null);
+            "符合下列情形之一的，个人信息处理者方可处理个人信息……", "仅后台可见的内部说明", true, null, null);
         when(legalClauseService.clausesByRuleVersionIds(any()))
             .thenReturn(Map.of(101L, List.of(clause)));
 
@@ -437,6 +437,11 @@ class ReportServiceTest {
         assertThat(detail.violations().get(0).legalClauses()).hasSize(1);
         assertThat(detail.violations().get(0).legalClauses().get(0).lawName()).isEqualTo("个人信息保护法");
         assertThat(detail.violations().get(0).legalClauses().get(0).articleNo()).isEqualTo("第十三条");
+        var json = new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(detail);
+        var publicClause = json.path("violations").get(0).path("legalClauses").get(0);
+        assertThat(publicClause.has("remark")).isFalse();
+        assertThat(publicClause.path("content").asText()).isEqualTo(clause.content());
+        assertThat(json.toString()).doesNotContain("仅后台可见的内部说明");
     }
 
     @Test

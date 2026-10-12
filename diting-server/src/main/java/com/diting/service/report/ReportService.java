@@ -286,7 +286,8 @@ public class ReportService {
                 info == null ? null : info.roleScope(),
                 item.getSentenceId(), item.getTriggerSentenceId(),
                 readLongs(item.getEvidenceSentenceIds()), ranges, item.getDeduct(), item.getNote(),
-                clauseInfo.getOrDefault(item.getRuleVersionId(), List.of())));
+                clauseInfo.getOrDefault(item.getRuleVersionId(), List.of()).stream()
+                    .map(com.diting.dto.ReportLegalClauseResponse::from).toList()));
             for (com.diting.dto.ViolationResponse.SentenceRange range : ranges) {
                 if (range.sentenceId() == null) {
                     continue;

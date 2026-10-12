@@ -15,10 +15,12 @@ export type Range = 'TODAY' | '30D' | 'QUARTER'
  * - audit：/api/admin/audit-logs 是 ADMIN only
  * - accounts：账号管理是 ADMIN only，且写操作与投资人视图无关
  * - agreements：协议正文可写，投资人视图只读看板，不给改配置的入口
+ * - legal-clauses：法律条款读接口是 {ADMIN, OPERATOR}，INVESTOR 一律 403（同协议配置）
  * 历史反例（已随页面下线，记录在这里避免重犯）：quality 是纯聚合页、对 INVESTOR 开放却被锁上了；
  * 而含转写原文的 recordings 反而没锁。
+ * 遗留不一致：rules / settings 的读接口同为 {ADMIN, OPERATOR}，却一直没锁（本页不动它）。
  */
-const IR_LOCKED = ['recordings', 'audit', 'accounts', 'agreements']
+const IR_LOCKED = ['recordings', 'audit', 'accounts', 'agreements', 'legal-clauses']
 
 const MODE_KEY = 'diting_admin_mode'
 const RANGE_KEY = 'diting_admin_range'
