@@ -1,19 +1,30 @@
-/**
- * 听悟后端的低层客户端与类型：只做「请求 + 缓存 + 原始数据」，
- * 结构到本项目 UI 的映射放在 record.ts / upload.ts，避免 UI 直接依赖后端字段命名（snake_case）。
- */
+/** client 模块原始接口。详情始终按记录 ID 请求，不复用可能过期或跨账号的列表缓存。 */
 import { request } from './request'
 
-export interface VoiceTranslationRaw {
-  voice_translation_id: number
+export interface DialogueRaw {
+  speaker: string
+  content: string
+  model_ids: number[]
+  hit_texts: string[]
+}
+
+export interface AudioTranslationRaw {
+  audio_translation_id: number
   user_id: number
-  task_id: string
-  task_status: string
-  result: string | Record<string, string> | null
-  model_name: string | null
-  original_file_name: string | null
-  file_url: string | null
-  total_duration: number | null
+  status: number
+  task_id: string | null
+  task_status: string | null
+  task_result: string | null
+  translation_result: string | null
+  handle_result: string | null
+  match_result: string | null
+  picture_handle_results: string | null
+  picture_match_results: string | null
+  picture_names: string | null
+  pictures: string | null
+  audio_name: string | null
+  audio: string | null
+  audio_duration: number | null
   createtime: string | null
 }
 
@@ -24,103 +35,54 @@ export interface UserRaw {
   createtime?: string
 }
 
-/** 列表接口不返回总量，按固定 20 条分页 */
 export const PAGE_SIZE = 20
 
-const cache = new Map<number, VoiceTranslationRaw>()
-
-export function cacheTask(task: VoiceTranslationRaw) {
-  cache.set(task.voice_translation_id, task)
-}
-
-export function getCachedTask(id: number): VoiceTranslationRaw | undefined {
-  return cache.get(id)
-}
-
-export function listVoiceTranslations(page: number, token: string) {
-  return request<VoiceTranslationRaw[]>({
-    url: `/voice_translation/list?page=${page}`,
+export async function listAudioTranslations(page: number, token: string): Promise<AudioTranslationRaw[]> {
+  const items = await request<AudioTranslationRaw[]>({
+    url: '/audio_translation/list',
+    data: { page },
     token,
-  }).then((items) => {
-    const list = items ?? []
-    list.forEach(cacheTask)
-    return list
+  })
+  return Array.isArray(items) ? items : []
+}
+
+export function getAudioTranslation(id: number, token: string): Promise<AudioTranslationRaw | null> {
+  return request({
+    url: '/audio_translation/get',
+    data: { audio_translation_id: id },
+    token,
   })
 }
 
-/**
- * 按 voice_translation_id 找到记录：先用列表缓存，未命中再逐页拉取（最多 20 页兜底）。
- * 记录页可能被直接打开（分享/回跳），不能假设列表已加载过。
- */
-export async function findVoiceTranslation(id: number, token: string): Promise<VoiceTranslationRaw | null> {
-  const cached = getCachedTask(id)
-  if (cached) {
-    return cached
-  }
-  for (let page = 0; page < 20; page++) {
-    const items = await listVoiceTranslations(page, token)
-    const hit = getCachedTask(id)
-    if (hit) {
-      return hit
-    }
-    if (items.length < PAGE_SIZE) {
-      break
-    }
-  }
-  return null
-}
-
-/** 创建转写任务；返回阿里云任务 ID（字符串） */
-export function addVoiceTranslation(
-  params: { fileName: string, originalFileName: string, fileUrl: string, totalDuration: number },
+export function addAudioTranslation(
+  params: { picture_names: string, pictures: string, audio_name: string, audio: string, audio_duration: number },
   token: string,
-) {
-  return request<string>({
-    url: '/voice_translation/add',
-    method: 'POST',
-    form: true,
-    token,
-    data: {
-      file_name: params.fileName,
-      original_file_name: params.originalFileName,
-      file_url: params.fileUrl,
-      total_duration: params.totalDuration,
-    },
-  })
-}
-
-/** 查询转写结果：进行中返回字符串「任务进行中」，完成返回 { speakerId: content } */
-export function getVoiceTranslation(taskId: string, token: string) {
-  return request<string | Record<string, string>>({
-    url: `/voice_translation/get?taskId=${encodeURIComponent(taskId)}`,
-    token,
-  })
+): Promise<null> {
+  return request({ url: '/audio_translation/add', method: 'POST', form: true, data: params, token })
 }
 
 export function getUser(token: string) {
-  return request<UserRaw>({
-    url: '/user/get',
-    token,
-  })
+  return request<UserRaw>({ url: '/user/get', token })
 }
 
-/** 解析 result 字段：字符串、对象、「任务进行中」都兼容；拿不到内容返回 null */
-export function parseTranscript(raw: VoiceTranslationRaw['result']): Record<string, string> | null {
+/** 结果字段是 JSON 字符串；空值、非法 JSON 和非法元素不影响其余结果展示。 */
+export function parseDialogues(raw: string | null | undefined): DialogueRaw[] {
   if (!raw) {
-    return null
-  }
-  if (typeof raw === 'object') {
-    return raw
-  }
-  const text = raw.trim()
-  if (!text || text === '任务进行中' || !text.startsWith('{')) {
-    return null
+    return []
   }
   try {
-    const parsed = JSON.parse(text) as Record<string, string>
-    return typeof parsed === 'object' && parsed !== null ? parsed : null
+    const value: unknown = JSON.parse(raw)
+    if (!Array.isArray(value)) {
+      return []
+    }
+    return value.filter(item => item && typeof item.content === 'string').map(item => ({
+      speaker: String(item.speaker ?? ''),
+      content: item.content,
+      model_ids: Array.isArray(item.model_ids) ? item.model_ids.filter((id: unknown) => typeof id === 'number' && Number.isFinite(id)) : [],
+      hit_texts: Array.isArray(item.hit_texts) ? item.hit_texts.filter((text: unknown) => typeof text === 'string' && text.length > 0) : [],
+    }))
   }
   catch {
-    return null
+    return []
   }
 }

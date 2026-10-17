@@ -1,8 +1,8 @@
-/** 支持的录音格式（与客服端「通话录音」导出一致；服务端会按文件头复核） */
-export const AUDIO_EXTENSIONS = ['mp3', 'wav', 'm4a', 'amr', 'aac', 'flac']
+/** 上传接口仅接受 MP3 音频 */
+export const AUDIO_EXTENSIONS = ['mp3']
 
-/** 客户端预检大小上限，避免白传一次；服务端 diting.media.max-size-bytes 才是权威值 */
-export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+/** 单文件不超过 10MB；每个文件单独发起一次上传请求 */
+export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 
 export interface ChosenFile {
   path: string
@@ -14,7 +14,7 @@ export interface ChosenFile {
 
 /**
  * 一次提交只交一种：一段录音，或最多 6 张图片。
- * 服务端仍能受理混合任务，但产品口径是二选一，页面按这个类型收口。
+ * 录音与图片分类提交，不能混合。
  */
 export type UploadMode = 'audio' | 'image'
 
@@ -80,7 +80,7 @@ export function chooseAudioFile(): Promise<ChosenFile> {
     return chooseBrowserFiles(AUDIO_EXTENSIONS.map(ext => `.${ext}`).join(','), false).then(([file]) => {
       const extension = file.name.split('.').pop()?.toLowerCase() ?? ''
       if (!AUDIO_EXTENSIONS.includes(extension)) {
-        throw new Error('录音格式不支持，请选择 MP3、WAV、M4A、AMR、AAC 或 FLAC')
+        throw new Error('录音仅支持 MP3 格式，请先转换')
       }
       if (!file.size || file.size > MAX_UPLOAD_BYTES) {
         throw new Error(`录音为空或超过 ${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)}MB，请重新选择`)
@@ -113,11 +113,12 @@ export function chooseAudioFile(): Promise<ChosenFile> {
           reject(new Error(`文件超过 ${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)}MB，请先压缩或剪裁`))
           return
         }
-        resolve({
-          path,
-          name: file.name || path.split('/').pop() || 'recording',
-          size,
-        })
+        const name = file.name || path.split('/').pop() || 'recording'
+        if (!/\.mp3$/i.test(name)) {
+          reject(new Error('录音仅支持 MP3 格式，请先转换'))
+          return
+        }
+        resolve({ path, name, size })
       },
       fail: reject,
     }
@@ -134,8 +135,8 @@ export function chooseAudioFile(): Promise<ChosenFile> {
   })
 }
 
-/** 图片：与阿里云 OCR 受理格式一致（HEIC 不在其中，需先转 JPG） */
-export const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp', 'bmp', 'gif', 'tiff', 'tif']
+/** 上传接口只接受 JPG / PNG，不接受 JPEG、WEBP 等其他后缀 */
+export const IMAGE_EXTENSIONS = ['jpg', 'png']
 
 /** 单张图片上限：官方文档写「二进制不超过 10MB」 */
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024
@@ -171,7 +172,7 @@ export function chooseImages(max: number = MAX_IMAGES): Promise<ChosenFile[]> {
       for (const file of files) {
         const extension = file.name.split('.').pop()?.toLowerCase() ?? ''
         if (!IMAGE_EXTENSIONS.includes(extension)) {
-          throw new Error('图片格式不支持：HEIC 等格式请先转成 JPG 或 PNG')
+          throw new Error('图片仅支持 JPG / PNG，请先转换')
         }
         if (!file.size || file.size > MAX_IMAGE_BYTES) {
           throw new Error(`图片为空或超过 ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)}MB，请重新选择`)
@@ -206,7 +207,7 @@ export function chooseImages(max: number = MAX_IMAGES): Promise<ChosenFile[]> {
           const name = path.split('/').pop() || 'photo.jpg'
           const extension = name.split('.').pop()?.toLowerCase() ?? ''
           if (!IMAGE_EXTENSIONS.includes(extension)) {
-            reject(new Error('图片格式不支持：HEIC 等格式请先转成 JPG 或 PNG'))
+            reject(new Error('图片仅支持 JPG / PNG，请先转换'))
             return
           }
           const size = (res.tempFiles ?? []).find(item => item.path === path)?.size ?? 0

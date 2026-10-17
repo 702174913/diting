@@ -4,7 +4,7 @@
  * 定稿要求把「交出去会发生什么」讲在前面：三步说明 + 四条录音承诺，
  * 再给一个唯一的主行动按钮。
  *
- * 本页只负责「交出去」：提交成功给提示并跳到 pages/report/detail（那条记录的处理页），
+ * 本页只负责「交出去」：提交成功给提示并返回 pages/history/index（记录列表），
  * 进度、结果与失败重传都由它讲，这里不再内联第二份进度。
  */
 import { onHide } from '@dcloudio/uni-app'
@@ -20,6 +20,7 @@ import {
   submitTask,
   uploadRaw,
 } from '@/api/upload'
+import { ApiError } from '@/api/request'
 import { readAudioDurationMs } from '@/utils/audioDuration'
 import { messageOf } from '@/utils/errors'
 import { newIdempotencyKey } from '@/utils/idempotency'
@@ -46,7 +47,7 @@ interface UploadAttempt {
   uploads: { sign: UploadSign, uploaded: boolean, verified: boolean }[]
   declaredDuration?: number
 }
-/** 同一批文件的逻辑提交凭证；网络错误不销毁，取得任务 ID 才清空。 */
+/** 同一批文件的逻辑提交凭证；网络错误不销毁，收到提交成功响应才清空。 */
 const attempt = ref<UploadAttempt | null>(null)
 const busy = ref(false)
 /** 上传阶段文案：拿不到百分比时只显示状态，不造进度条 */
@@ -116,7 +117,7 @@ function canChangeFiles() {
     return false
   }
   if (attempt.value?.submitted) {
-    uni.showToast({ title: '上次登记结果未确认，请先重试确认', icon: 'none' })
+    uni.showToast({ title: '上次提交结果未确认，请先查看记录列表', icon: 'none' })
     return false
   }
   return true
@@ -277,6 +278,15 @@ async function confirmUpload() {
   if (files.length === 0 || busy.value) {
     return
   }
+  if (attempt.value?.submitted) {
+    uni.showToast({ title: '提交结果未确认，请先到记录列表查看，避免重复提交', icon: 'none' })
+    files.forEach(releaseChosenFile)
+    pendingFiles.value = []
+    attempt.value = null
+    sheetVisible.value = false
+    uni.switchTab({ url: '/pages/history/index' })
+    return
+  }
   if (!requireH5Login(userStore.token, 'upload')) {
     return
   }
@@ -305,7 +315,7 @@ async function confirmUpload() {
     uni.showToast({ title: '请使用原账号确认本次上传结果', icon: 'none' })
     return
   }
-  // 受理响应丢失后服务端可能已预占最后一份；恢复同一提交不能被额度预检拦住。
+  // 正式提交前再检查一次当前配置。
   if (!attempt.value?.submitted && !(await precheckQuota(mode.value === 'audio'))) {
     sheetVisible.value = false
     busy.value = false
@@ -324,7 +334,7 @@ async function confirmUpload() {
   sheetVisible.value = false
   uploadPercent.value = null
   try {
-    // 逐个：签发 → 原始字节 PUT → complete 校验；任一失败整体中止（不登记半个任务）
+    // 逐个上传并确认已取得返回文件名；任一失败不登记半个任务。
     if (mode.value === 'audio' && currentAttempt.declaredDuration === undefined && audioSelected.value?.durationMs) {
       currentAttempt.declaredDuration = Math.ceil(audioSelected.value.durationMs / 1000)
     }
@@ -357,31 +367,27 @@ async function confirmUpload() {
     }
     uploadStage.value = '登记中…'
     currentAttempt.submitted = true
-    const task = await submitTask(uploadIds, currentAttempt.declaredDuration, token, currentAttempt.key)
+    await submitTask(uploadIds, currentAttempt.declaredDuration, token, currentAttempt.key)
     uploadStage.value = ''
+    sheetVisible.value = false
     files.forEach(releaseChosenFile)
     pendingFiles.value = []
     attempt.value = null
-    // 先给「交出去了」的明确反馈，再把人带到这条记录的处理页：进度、结果与失败重传都归它讲。
+    // add 不返回记录 ID：成功后返回列表，不猜测最新一条属于本次提交。
     // 小延迟是为了让 toast 在真机上先显示出来；跳转失败就留在本页，记录可在「记录」里找到。
     uni.showToast({ title: '上传成功', icon: 'success', duration: 1500 })
-    scheduleOpenDetail(task.id)
+    scheduleOpenHistory()
   }
   catch (e) {
+    if (e instanceof ApiError && e.code !== 0 && e.code < 500 && attempt.value) {
+      attempt.value.submitted = false
+    }
     uploadStage.value = ''
     uni.showToast({ title: messageOf(e), icon: 'none' })
   }
   finally {
     busy.value = false
   }
-}
-
-/** 上传成功后进这条记录的处理页：处理中/已完成都由它负责讲 */
-function openDetail(id: number) {
-  if (!id) {
-    return
-  }
-  uni.navigateTo({ url: `/pages/report/detail?id=${id}` })
 }
 
 /** 待跳转的定时器：这段等待里页面可能已被切走，不能把人弹到另一页去 */
@@ -394,12 +400,12 @@ function cancelJump() {
   }
 }
 
-/** 提示 + 跳转是一个动作：先给 toast 留出可见时间，再进处理页 */
-function scheduleOpenDetail(id: number) {
+/** 提示 + 跳转是一个动作：先给 toast 留出可见时间，再回记录列表 */
+function scheduleOpenHistory() {
   cancelJump()
   jumpTimer = setTimeout(() => {
     jumpTimer = null
-    openDetail(id)
+    uni.switchTab({ url: '/pages/history/index' })
   }, 900)
 }
 

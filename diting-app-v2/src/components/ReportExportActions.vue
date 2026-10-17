@@ -20,7 +20,7 @@ const emit = defineEmits<{
       @click="emit('save', false)"
     >
       <image class="btn-ic" :src="downloadWhite" mode="widthFix" />
-      <text>保存这份记录</text>
+      <text>导出 PDF（当前为示例）</text>
     </button>
     <button
       class="btn btn-soft btn-block btn-gap"
@@ -29,7 +29,7 @@ const emit = defineEmits<{
     >
       <text>连同原件一起打包（录音 / 图片）</text>
     </button>
-    <text v-if="!originalsAvailable" class="hint">没有可打包的原件，或原件信息暂不可用；成功发布的文字记录仍可保存。</text>
+    <text v-if="!originalsAvailable" class="hint">暂不支持原件打包；PDF 当前为固定示例，后续再关联实际记录。</text>
   </view>
 </template>
 

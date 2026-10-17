@@ -88,7 +88,7 @@ const promises = [
         {{ ctaLabel }}
       </button>
       <text v-if="busy && uploadPercent !== null" class="muted up-caption">已上传 {{ uploadPercent }}%</text>
-      <text v-else class="muted up-caption">两种只能选一种，换一种会把已选的移除</text>
+      <text v-else class="muted up-caption">仅支持 MP3 音频、JPG/PNG 图片，单个文件不超过 10MB；两种不能混合提交</text>
 
       <view v-if="pendingFiles.length" class="picked">
         <view v-for="file in pendingFiles" :key="file.path" class="picked-row">

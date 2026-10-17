@@ -20,7 +20,7 @@ import SentenceItem from '@/components/SentenceItem.vue'
 import ReportOverview from '@/components/ReportOverview.vue'
 import ReportExportActions from '@/components/ReportExportActions.vue'
 import ProcessingCard from '@/components/ProcessingCard.vue'
-import { createExport, fetchAssets, fetchExportDownload, fetchReport, fetchTaskStatus, waitExport } from '@/api/record'
+import { createExport, fetchAssets, fetchExportDownload, fetchReport, fetchTaskStatus, validateDownloadedPdf, waitExport } from '@/api/record'
 import { useUserStore } from '@/stores/user'
 import { formatDateTime } from '@/utils/format'
 import { exportArtifactName } from '@/utils/exportArtifact'
@@ -306,6 +306,9 @@ async function save(withAudio: boolean) {
       saveViaUrl(downloadUrl, fileName)
       uni.showToast({ title: '已改为直接下载，请留意浏览器提示', icon: 'none' })
     }
+    if (downloadUrl.startsWith('blob:')) {
+      setTimeout(() => URL.revokeObjectURL(downloadUrl), 4000)
+    }
     // #endif
     // #ifndef H5
     // 小程序端只有下载任务级进度，没有回调百分比：遮罩 loading 到回调里关
@@ -339,7 +342,7 @@ async function save(withAudio: boolean) {
  * 自己拉流后既能看到进度，文件名也由前端确定（Blob 同源，`download` 属性生效）。
  */
 async function saveInBrowser(url: string, fileName: string) {
-  const res = await fetch(url)
+  const res = await fetch(url, { credentials: 'omit' })
   if (!res.ok) {
     throw new Error(`HTTP ${res.status}`)
   }
@@ -368,16 +371,25 @@ function saveViaUrl(url: string, fileName: string) {
 
 // #ifndef H5
 function openPdf(url: string) {
+  const token = userStore.token
   uni.downloadFile({
     url,
-    success: (r) => {
-      uni.hideLoading()
-      uni.openDocument({
-        filePath: r.tempFilePath,
-        fileType: 'pdf',
-        showMenu: true,
-        fail: () => uni.showToast({ title: '打不开这份记录，请稍后再试', icon: 'none' }),
-      })
+    success: async (r) => {
+      try {
+        await validateDownloadedPdf(r.tempFilePath, r.statusCode, token)
+        uni.openDocument({
+          filePath: r.tempFilePath,
+          fileType: 'pdf',
+          showMenu: true,
+          fail: () => uni.showToast({ title: '打不开这份记录，请稍后再试', icon: 'none' }),
+        })
+      }
+      catch (error) {
+        uni.showToast({ title: messageOf(error), icon: 'none' })
+      }
+      finally {
+        uni.hideLoading()
+      }
     },
     fail: () => {
       uni.hideLoading()

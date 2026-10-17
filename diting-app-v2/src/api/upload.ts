@@ -1,15 +1,8 @@
-/**
- * 上传接口：听悟后端只提供 multipart 单文件上传 `/upload/upload_file`。
- * 为了不改动上传页现有的「登记 + 幂等 + 重试」交互，这里保留 sign/uploadRaw/complete/submit
- * 四个函数的签名，内部把预签名 PUT 降级为 multipart 上传：
- *   signUpload  只分配本地会话号（token 走上传地址 query）
- *   uploadRaw   真正发送 multipart（小程序 uni.uploadFile / H5 XHR+FormData）
- *   complete   从本地会话里取回服务端返回的文件名/URL
- *   submitTask 调用 /voice_translation/add 登记转写任务，并解析出本地记录 id
- */
+/** multipart 上传和分类提交；沿用页面现有的上传会话及重试交互。 */
 import { configureMap } from './configure'
-import { ApiError, BASE_URL } from './request'
-import { addVoiceTranslation, listVoiceTranslations } from './tingwu'
+import { ApiError, BASE_URL, unwrapEnvelope } from './request'
+import { addAudioTranslation } from './tingwu'
+import { AUDIO_EXTENSIONS, IMAGE_EXTENSIONS, MAX_IMAGES, MAX_UPLOAD_BYTES } from '@/utils/choose'
 import type { QuotaSnapshot } from '@/types/api'
 
 export interface UploadSign {
@@ -36,22 +29,16 @@ export interface UploadComplete {
 /** 同意条款版本：本后端不校验，保留常量供页面/文案使用 */
 export const CONSENT_VERSION = 'v1'
 
-/** 客户端预检上限（服务端才是权威值） */
-export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+export { MAX_UPLOAD_BYTES } from '@/utils/choose'
 
 interface UploadedFile {
   fileName: string
   originalName: string
-  fileUrl: string
 }
 
 const signs = new Map<number, UploadSign>()
 const uploads = new Map<number, UploadedFile>()
 let counter = 0
-
-function delay(ms: number) {
-  return new Promise(resolve => setTimeout(resolve, ms))
-}
 
 /** 配置项转正整数，取不到或非法时用兜底值 */
 function toPositiveInt(raw: string | undefined, fallback: number): number {
@@ -61,7 +48,7 @@ function toPositiveInt(raw: string | undefined, fallback: number): number {
 
 /** 额度预检：免费份数 / 录音时长上限 / 风险阈值来自 /configure/list，取不到用兜底值 */
 export async function fetchQuota(_token: string): Promise<QuotaSnapshot> {
-  const config = await configureMap()
+  const config = await configureMap(_token)
   const limit = toPositiveInt(config['每日免费份数'], 3)
   return {
     businessDate: new Date().toISOString().slice(0, 10),
@@ -76,6 +63,13 @@ export async function fetchQuota(_token: string): Promise<QuotaSnapshot> {
 
 /** 申请上传会话：分配本地 uploadId；token 通过上传地址的 query 传给后端 */
 export function signUpload(filename: string, _declaredSize: number, token: string): Promise<UploadSign> {
+  const extension = filename.split('.').pop()?.toLowerCase() ?? ''
+  if (![...AUDIO_EXTENSIONS, ...IMAGE_EXTENSIONS].includes(extension)) {
+    return Promise.reject(new ApiError(422, '仅支持 MP3 音频、JPG/PNG 图片'))
+  }
+  if (_declaredSize <= 0 || _declaredSize > MAX_UPLOAD_BYTES) {
+    return Promise.reject(new ApiError(422, '文件为空或超过 10MB，请重新选择'))
+  }
   const uploadId = ++counter
   const sign: UploadSign = {
     uploadId,
@@ -116,47 +110,42 @@ export function completeUpload(uploadId: number, _token: string): Promise<Upload
   })
 }
 
-/**
- * 登记识别任务：只接收单段录音。
- * 图片（多文件）在本后端没有对应能力，明确提示暂不支持，不伪造成功。
- */
+/** 同次提交只允许一段 MP3 或最多六张图片；成功不查列表、不猜记录 ID。 */
 export async function submitTask(
   uploadIds: number[],
   declaredDurationSec: number | undefined,
   token: string,
   _idempotencyKey?: string,
-): Promise<{ id: number }> {
+): Promise<void> {
   if (uploadIds.length === 0) {
     throw new ApiError(400, '没有可提交的文件，请重新上传')
   }
-  if (uploadIds.length > 1) {
-    throw new ApiError(422, '当前服务暂不支持图片识别，请上传录音', 'UNPROCESSABLE')
-  }
-  const stored = uploads.get(uploadIds[0])
-  if (!stored) {
-    throw new ApiError(409, '上传会话已失效，请重新上传', 'CONFLICT')
-  }
-  const taskId = await addVoiceTranslation({
-    fileName: stored.fileName,
-    originalFileName: stored.originalName,
-    fileUrl: stored.fileUrl,
-    totalDuration: declaredDurationSec ?? 0,
-  }, token)
-  const id = await resolveCreatedId(taskId, token)
-  return { id }
-}
-
-/** 创建任务后，列表里有轻微延迟：轮询几次把新建记录的本地 id 找回来 */
-async function resolveCreatedId(taskId: string, token: string): Promise<number> {
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const items = await listVoiceTranslations(0, token)
-    const hit = items.find(item => item.task_id === taskId)
-    if (hit) {
-      return hit.voice_translation_id
+  const files = uploadIds.map((id) => {
+    const file = uploads.get(id)
+    if (!file) {
+      throw new ApiError(409, '上传会话已失效，请重新上传', 'CONFLICT')
     }
-    await delay(800)
+    return file
+  })
+  const audio = files.filter(file => /\.mp3$/i.test(file.originalName))
+  const pictures = files.filter(file => /\.(jpg|png)$/i.test(file.originalName))
+  if (audio.length + pictures.length !== files.length || (audio.length && pictures.length)
+    || audio.length > 1 || pictures.length > MAX_IMAGES) {
+    throw new ApiError(422, '请分类提交：一个 MP3 音频或最多六张 JPG/PNG 图片')
   }
-  return 0
+  // 不选的类别传空串；文件名只作展示，上传返回名必须原样交给后端。
+  await addAudioTranslation({
+    picture_names: pictures.map(file => file.originalName).join(','),
+    pictures: pictures.map(file => file.fileName).join(','),
+    audio_name: audio[0]?.originalName ?? '',
+    audio: audio[0]?.fileName ?? '',
+    audio_duration: audio.length && Number.isFinite(declaredDurationSec)
+      ? Math.max(0, Math.ceil(declaredDurationSec!)) : 0,
+  }, token)
+  uploadIds.forEach((id) => {
+    uploads.delete(id)
+    signs.delete(id)
+  })
 }
 
 interface UploadFileResult {
@@ -172,37 +161,26 @@ interface FileSystemManagerLike {
   }) => void
 }
 
-function fileNameFromValue(value: string, fallback: string): string {
-  if (/^https?:\/\//i.test(value)) {
-    const clean = value.split('?')[0]
-    return clean.split('/').pop() || fallback
-  }
-  return value || fallback
-}
-
-function acceptUploadResponse(sign: UploadSign, raw: string): void {
-  let body: { code?: number, msg?: string, data?: unknown } | undefined
+function acceptUploadResponse(sign: UploadSign, raw: string, statusCode = 200): void {
+  let body: unknown
   try {
     body = JSON.parse(raw)
   }
   catch {
-    body = undefined
+    throw new ApiError(statusCode, '上传响应格式不正确，请重试')
   }
-  if (!body || typeof body.code !== 'number' || body.code !== 200) {
-    throw new ApiError(body?.code ?? 500, body?.msg || '上传失败，请重试')
+  const token = decodeURIComponent(sign.uploadUrl.split('token=')[1] ?? '')
+  const value = unwrapEnvelope<unknown>(body, statusCode, token)
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new ApiError(500, '上传未返回文件名，请重试')
   }
-  const value = typeof body.data === 'string' ? body.data : ''
-  uploads.set(sign.uploadId, {
-    fileName: fileNameFromValue(value, sign.objectKey),
-    originalName: sign.objectKey,
-    fileUrl: value,
-  })
+  uploads.set(sign.uploadId, { fileName: value, originalName: sign.objectKey })
 }
 
 /**
  * 原始字节上传（实际为 multipart）：
  * - 微信小程序：uni.uploadFile 发送文件，可拿到上传进度；
- * - H5：XHR + FormData 发送 Blob，可用 upload.onprogress 汇报进度。
+ * - H5：fetch + FormData 明确禁止携带 cookie；无可靠百分比时只展示上传阶段。
  */
 export function uploadRaw(
   sign: UploadSign,
@@ -214,7 +192,7 @@ export function uploadRaw(
   if (fs) {
     return uploadViaUni(sign, filePath, onProgress)
   }
-  return uploadViaXhr(sign, filePath, onProgress)
+  return uploadViaBrowser(sign, filePath, onProgress)
 }
 
 function uploadViaUni(
@@ -231,7 +209,7 @@ function uploadViaUni(
       header: sign.headers,
       success: (res: UploadFileResult) => {
         try {
-          acceptUploadResponse(sign, typeof res.data === 'string' ? res.data : '')
+          acceptUploadResponse(sign, typeof res.data === 'string' ? res.data : '', res.statusCode ?? 200)
           resolve()
         }
         catch (error) {
@@ -246,43 +224,22 @@ function uploadViaUni(
   })
 }
 
-function uploadViaXhr(
+async function uploadViaBrowser(
   sign: UploadSign,
   filePath: string,
   onProgress?: (percent: number | null) => void,
 ): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    fetch(filePath)
-      .then(res => res.blob())
-      .then((blob) => {
-        const form = new FormData()
-        form.append('file', blob, sign.objectKey)
-        const xhr = new XMLHttpRequest()
-        xhr.open('POST', sign.uploadUrl)
-        Object.keys(sign.headers || {}).forEach((key) => {
-          xhr.setRequestHeader(key, sign.headers[key])
-        })
-        xhr.upload.onprogress = (event) => {
-          if (event.lengthComputable && event.total > 0) {
-            onProgress?.(Math.round((event.loaded / event.total) * 100))
-          }
-        }
-        xhr.onload = () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            try {
-              acceptUploadResponse(sign, xhr.responseText)
-              resolve()
-            }
-            catch (error) {
-              reject(error instanceof Error ? error : new Error('上传失败，请重试'))
-            }
-            return
-          }
-          reject(new Error(`上传失败（HTTP ${xhr.status}）`))
-        }
-        xhr.onerror = () => reject(new Error('网络中断，请重试'))
-        xhr.send(form)
-      })
-      .catch(error => reject(error instanceof Error ? error : new Error('上传失败，请重试')))
+  onProgress?.(null)
+  const source = await fetch(filePath, { credentials: 'omit' })
+  if (!source.ok) {
+    throw new ApiError(source.status, '读取所选文件失败，请重新选择')
+  }
+  const form = new FormData()
+  form.append('file', await source.blob(), sign.objectKey)
+  // 不手写 Content-Type，由浏览器生成 multipart boundary。
+  const response = await fetch(sign.uploadUrl, {
+    method: 'POST', credentials: 'omit', headers: sign.headers, body: form,
   })
+  acceptUploadResponse(sign, await response.text(), response.status)
+  onProgress?.(100)
 }

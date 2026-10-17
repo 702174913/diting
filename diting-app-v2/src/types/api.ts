@@ -45,6 +45,12 @@ export interface Sentence {
   /** OCR 句子对应的图片资产 ID；音频句子为 null */
   sourceAssetId: number | null
   speakerId: number | null
+  /** client 接口保留原始 speaker；OCR 不强行对应某张原图。 */
+  speaker?: string
+  sourceKind?: 'AUDIO' | 'IMAGE'
+  hasTiming?: boolean
+  modelIds?: number[]
+  hitTexts?: string[]
   /** 历史报告的业务角色；新任务不推断身份，界面直接展示 SpeakerId */
   role: 'AGENT' | 'CUSTOMER' | 'UNKNOWN' | null
   startMs: number

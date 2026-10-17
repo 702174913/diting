@@ -1,9 +1,5 @@
 <script setup lang="ts">
-/**
- * 质检记录里的单条判读结果：时间戳 + 说话人 + 原文（按服务端给的高亮区间切分）+ 命中规则名。
- * 高亮用原文 UTF-16 左闭右开区间，前端只做切片渲染，**不渲染任何 HTML**（服务端也不生成 HTML）。
- * 命中只报规则名：依据是原文里的高亮片段，规则库的匹配词不外显（见 utils/reportNotes）。
- */
+/** 纯文本展示识别结果及原始 model_ids / hit_texts，不推断规则名称。 */
 import { computed } from 'vue'
 import type { Sentence } from '@/types/api'
 import { formatClock } from '@/utils/format'
@@ -12,7 +8,13 @@ import { displaySentenceNote } from '@/utils/reportNotes'
 const props = defineProps<{ sentence: Sentence, sourceLabel?: string }>()
 
 const speakerLabel = computed(() => {
-  const { speakerId, sourceAssetId } = props.sentence
+  const { speakerId, sourceAssetId, sourceKind, speaker } = props.sentence
+  if (sourceKind === 'IMAGE') {
+    return '图片识别文字'
+  }
+  if (speaker) {
+    return `说话人 ${speaker}`
+  }
   if (sourceAssetId != null) {
     return props.sourceLabel ?? '图片原件'
   }
@@ -49,10 +51,12 @@ const parts = computed(() => {
 
 <template>
   <view class="find">
-    <text class="f-ts">{{ sentence.sourceAssetId != null ? speakerLabel : `${formatClock(sentence.startMs)} · ${speakerLabel}` }}</text>
+    <text class="f-ts">{{ sentence.sourceAssetId != null || sentence.hasTiming === false ? speakerLabel : `${formatClock(sentence.startMs)} · ${speakerLabel}` }}</text>
     <text class="f-q">
       <text v-for="(part, index) in parts" :key="index" :class="{ 'f-hl': part.hit }">{{ part.text }}</text>
     </text>
+    <text v-if="sentence.modelIds?.length" class="f-note">model_ids：{{ sentence.modelIds.join(', ') }}</text>
+    <text v-if="sentence.hitTexts?.length" class="f-note">hit_texts：{{ sentence.hitTexts.join('、') }}</text>
     <text v-for="(note, index) in sentence.notes" :key="`n-${index}`" class="f-note">{{ displaySentenceNote(note) }}</text>
   </view>
 </template>

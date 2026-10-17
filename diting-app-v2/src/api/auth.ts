@@ -17,6 +17,7 @@ export async function loginByPassword(username: string, password: string): Promi
     url: '/user/login',
     method: 'POST',
     form: true,
+    token: '',
     data: { username, password },
   })
   const id = decodeJwtUserId(token) ?? 0

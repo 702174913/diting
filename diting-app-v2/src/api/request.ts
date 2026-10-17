@@ -8,7 +8,7 @@ import { clearToken, getToken } from '@/utils/authToken'
 
 export interface Envelope<T> {
   code: number
-  msg: string
+  msg: string | null
   data: T
 }
 
@@ -98,38 +98,82 @@ function withToken(url: string, token: string): string {
   return `${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`
 }
 
+/** 普通请求、multipart 上传和 PDF 错误信封共用同一鉴权失效处理。 */
+export function unwrapEnvelope<T>(raw: unknown, statusCode: number, token: string): T {
+  const body = raw as Envelope<T> | undefined
+  const code = statusCode >= 400 ? statusCode : body?.code
+  if (isTokenExpiredCode(code ?? 0) && token === getToken()) {
+    handleUnauthorized()
+  }
+  if (statusCode >= 400) {
+    throw new ApiError(statusCode, body?.msg || `请求失败（HTTP ${statusCode}）`, symbolFor(statusCode))
+  }
+  if (!body || typeof body.code !== 'number') {
+    throw new ApiError(statusCode, `响应格式不符合预期（HTTP ${statusCode}）`)
+  }
+  if (body.code !== SUCCESS_CODE) {
+    throw new ApiError(body.code, body.msg || '请求失败', symbolFor(body.code))
+  }
+  return body.data
+}
+
+/** H5 使用 fetch 显式 omit，包含同源场景；仅关闭 XHR withCredentials 不能禁用同源 cookie。 */
+async function requestInBrowser<T>(options: RequestOptions, token: string): Promise<T> {
+  const method = options.method ?? 'GET'
+  const form = options.form === true
+  let url = withToken(`${BASE_URL}${options.url}`, token)
+  const init: RequestInit = { method, credentials: 'omit' }
+  if (method === 'GET') {
+    const query = options.data ? encodeForm(options.data) : ''
+    if (query) {
+      url += `${url.includes('?') ? '&' : '?'}${query}`
+    }
+  }
+  else {
+    init.headers = { 'Content-Type': form ? 'application/x-www-form-urlencoded' : 'application/json' }
+    init.body = options.data ? (form ? encodeForm(options.data) : JSON.stringify(options.data)) : undefined
+  }
+  try {
+    const response = await fetch(url, init)
+    let body: unknown
+    try {
+      body = await response.json()
+    }
+    catch {
+      // HTTP 错误或非信封响应统一交给解析器报错。
+    }
+    return unwrapEnvelope<T>(body, response.status, token)
+  }
+  catch (error) {
+    if (error instanceof ApiError) {
+      throw error
+    }
+    throw new ApiError(0, '网络异常，请稍后重试')
+  }
+}
+
 export function request<T>(options: RequestOptions): Promise<T> {
   const token = options.token ?? getToken()
+  if (typeof document !== 'undefined' && typeof fetch === 'function') {
+    return requestInBrowser<T>(options, token)
+  }
   const form = options.form === true
   return new Promise<T>((resolve, reject) => {
     uni.request({
       url: withToken(`${BASE_URL}${options.url}`, token),
       method: options.method ?? 'GET',
       data: form && options.data ? encodeForm(options.data) : options.data,
+      withCredentials: false,
       header: {
         'Content-Type': form ? 'application/x-www-form-urlencoded' : 'application/json',
       },
       success: (res) => {
-        const body = res.data as Envelope<T> | undefined
-        // 后端异常时 Spring 错误页会被统一信封包成 { code:200, data:{status:500,...} }，
-        // 只看 code 会把 500 当成功。HTTP 状态才是权威，先按它拦。
-        if (res.statusCode >= 400) {
-          reject(new ApiError(res.statusCode, (body as { msg?: string } | undefined)?.msg || `请求失败（HTTP ${res.statusCode}）`))
-          return
+        try {
+          resolve(unwrapEnvelope<T>(res.data, res.statusCode, token))
         }
-        if (!body || typeof body.code !== 'number') {
-          reject(new ApiError(res.statusCode, `响应格式不符合预期（HTTP ${res.statusCode}）`))
-          return
+        catch (error) {
+          reject(error)
         }
-        if (body.code !== SUCCESS_CODE) {
-          // 202/401 表示登录态失效（Token 过期、伪造、身份域不符）：清掉本地登录态，交给页面重新登录
-          if (isTokenExpiredCode(body.code) && token === getToken()) {
-            handleUnauthorized()
-          }
-          reject(new ApiError(body.code, body.msg || '请求失败', symbolFor(body.code)))
-          return
-        }
-        resolve(body.data)
       },
       fail: (err) => {
         reject(new ApiError(0, (err as { errMsg?: string })?.errMsg ?? '网络异常，请稍后重试'))

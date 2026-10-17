@@ -114,7 +114,7 @@ function pageHarness(page, options = {}) {
 
 const flush = () => new Promise(resolve => setImmediate(resolve))
 
-test('登记响应丢失后的重试复用同一幂等键和上传会话，即使剩余额度为零', async () => {
+test('提交响应丢失后先回列表确认，不重复登记任务', async () => {
   let signs = 0
   let puts = 0
   let completes = 0
@@ -149,10 +149,10 @@ test('登记响应丢失后的重试复用同一幂等键和上传会话，即�
   assert.equal(puts, 1)
   assert.equal(completes, 1)
   assert.equal(quotaChecks, 1)
-  assert.deepEqual(submissions[0], submissions[1])
+  assert.equal(submissions.length, 1)
   assert.equal(h.state.attempt.value, null)
   h.runTimeouts()
-  assert.deepEqual(h.navigations, ['/pages/report/detail?id=88'])
+  assert.deepEqual(h.navigations, ['/pages/history/index'])
 })
 
 test('报告仅对404显示不存在，网络错误保留重试入口', async () => {
@@ -346,7 +346,7 @@ test('上传页不再内联进度：提交完只负责提示与跳转', async ()
   assert.doesNotMatch(h.template, /<ProcessingCard/)
 })
 
-test('上传成功后先提示再跳到这条记录的处理页', async () => {
+test('上传成功后先提示再返回记录列表', async () => {
   const h = pageHarness('upload', {
     uploadApi: {
       fetchQuota: async () => ({ remaining: 1, maxRecordingMinutes: 10 }),
@@ -366,7 +366,7 @@ test('上传成功后先提示再跳到这条记录的处理页', async () => {
     { title: '上传成功', icon: 'success' },
   )
   h.runTimeouts()
-  assert.deepEqual(h.navigations, ['/pages/report/detail?id=88'])
+  assert.deepEqual(h.navigations, ['/pages/history/index'])
   h.hooks.onUnmounted()
 })
 
