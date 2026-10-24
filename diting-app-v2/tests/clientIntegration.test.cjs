@@ -124,6 +124,22 @@ test('详情每次使用 audio_translation_id 直接查询，转写完成不等�
   }
 })
 
+test('详情页并发拉报告/状态/原件只触发一次详情请求', async () => {
+  const c = client({ respond: request => (request.url.includes('/configure/list')
+    ? { code: 200, data: [], msg: null }
+    : { code: 200, data: task(), msg: null }) })
+  const api = c.load('@/api/record')
+  await Promise.all([
+    api.fetchReport(12, c.token),
+    api.fetchTaskStatus(12, c.token),
+    api.fetchAssets(12, c.token),
+  ])
+  const gets = c.calls.filter(call => call.url.includes('/audio_translation/get'))
+  assert.equal(gets.length, 1)
+  await api.fetchTaskStatus(12, c.token)
+  assert.equal(c.calls.filter(call => call.url.includes('/audio_translation/get')).length, 2)
+})
+
 test('不存在或不属于当前用户的详情返回可识别的 404', async () => {
   const c = client()
   await assert.rejects(c.load('@/api/record').fetchReport(12, c.token), error => error.code === 404)
@@ -148,6 +164,32 @@ test('音频和图片结果解析 JSON，保留原始规则 ID 与关键词，�
   assert.equal(report.sentences[1].sourceAssetId, null)
 })
 
+test('命中句解析 models 并展示规则与法条，重复 model_id 去重', async () => {
+  const model = (id, serial, type, name, provisions) => ({ model_id: id, serial_number: serial, violation_type: type, violation_name: name, legalProvisions: provisions })
+  const c = client({ respond: () => ({ code: 200, data: task({
+    handle_result: JSON.stringify([
+      { speaker: '1', content: '王先生是吧', models: [], model_ids: [], hit_texts: [] },
+      { speaker: '2', content: '我再想想办法', models: [], model_ids: [], hit_texts: [] },
+    ]),
+    match_result: JSON.stringify([
+      { speaker: '1', content: '王先生是吧', model_ids: [100, 100, 99], models: [
+        model(100, 'D28', '机构管理', '发现不宜催收账户未按流程处置', [{ legal_provision_id: 63, name: '消费者权益保护法', which: '第五十五条', content: '经营者...' }]),
+        model(100, 'D28', '机构管理', '发现不宜催收账户未按流程处置', [{ legal_provision_id: 63, name: '消费者权益保护法', which: '第五十五条', content: '经营者...' }]),
+        model(99, 'D27', '激进催收', '肢体冲突或突发情况瞒报', [{ legal_provision_id: 45, name: '三类银行合作通知', which: '合作机构管理', content: '' }]),
+      ], hit_texts: ['王先生'] },
+      { speaker: '2', content: '我再想想办法', model_ids: [], models: [], hit_texts: [] },
+    ]),
+  }), msg: null }) })
+  const report = await c.load('@/api/record').fetchReport(12, c.token)
+  assert.equal(report.flaggedCount, 1)
+  const rules = report.sentences[0].rules
+  assert.equal(rules.length, 2)
+  assert.deepEqual(plain(rules.map(rule => rule.modelId)), [100, 99])
+  assert.equal(rules[0].violationName, '发现不宜催收账户未按流程处置')
+  assert.equal(rules[0].provisions[0].which, '第五十五条')
+  assert.equal(report.sentences[1].rules.length, 0)
+})
+
 test('空值、非法 JSON、错误数组元素不使报告崩溃，整理原文可作为回退', async () => {
   const c = client({ respond: () => ({ code: 200, data: task({
     status: 5, match_result: '{bad', picture_match_results: 'null',
@@ -161,11 +203,67 @@ test('空值、非法 JSON、错误数组元素不使报告崩溃，整理原文
   assert.equal(report.sentences[0].speaker, '0')
 })
 
-test('单音频提交填对源文件名与返回名，不查列表也不伪造记录 ID', async () => {
+test('handle_result 缺失时从 translation_result 的段落 Words 拼出转写原文', async () => {
+  const c = client({ respond: () => ({ code: 200, data: task({
+    status: 5,
+    handle_result: null,
+    translation_result: JSON.stringify({ Transcription: { Paragraphs: [
+      { SpeakerId: 7, Words: [{ Text: '您' }, { Text: '好' }] },
+      { SpeakerId: '2', Words: [{ Text: '你好' }] },
+      { SpeakerId: 3, Words: [] },
+    ] } }),
+  }), msg: null }) })
+  const report = await c.load('@/api/record').fetchReport(12, c.token)
+  assert.equal(report.sentences.length, 2)
+  assert.equal(report.sentences[0].text, '您好')
+  assert.equal(report.sentences[0].speaker, '7')
+  assert.equal(report.sentences[1].speaker, '2')
+})
+
+test('match_result 只含命中项时按原文合并，不丢失未命中的完整对话', async () => {
+  const c = client({ respond: () => ({ code: 200, data: task({
+    status: 7,
+    handle_result: JSON.stringify([
+      { speaker: '1', content: '第一句' },
+      { speaker: '2', content: '第二句' },
+      { speaker: '1', content: '第三句' },
+    ]),
+    match_result: JSON.stringify([
+      { speaker: '2', content: '第二句', model_ids: [4], hit_texts: ['第二'] },
+    ]),
+  }), msg: null }) })
+  const report = await c.load('@/api/record').fetchReport(12, c.token)
+  assert.equal(report.sentences.length, 3)
+  assert.deepEqual(plain(report.sentences[0].modelIds), [])
+  assert.deepEqual(plain(report.sentences[1].modelIds), [4])
+  assert.equal(report.sentences[1].text, '第二句')
+  assert.equal(report.flaggedCount, 1)
+})
+
+test('完整对话与匹配结果等长时按下标合并命中信息', async () => {
+  const c = client({ respond: () => ({ code: 200, data: task({
+    status: 7,
+    handle_result: JSON.stringify([
+      { speaker: '1', content: '甲乙' },
+      { speaker: '2', content: '甲乙' },
+    ]),
+    match_result: JSON.stringify([
+      { speaker: '1', content: '甲乙', model_ids: [], hit_texts: [] },
+      { speaker: '2', content: '甲乙', model_ids: [9], hit_texts: ['乙'] },
+    ]),
+  }), msg: null }) })
+  const report = await c.load('@/api/record').fetchReport(12, c.token)
+  assert.equal(report.sentences.length, 2)
+  assert.deepEqual(plain(report.sentences[0].modelIds), [])
+  assert.deepEqual(plain(report.sentences[1].modelIds), [9])
+  assert.equal(report.flaggedCount, 1)
+})
+
+test('单音频提交填对源文件名与返回名，未返回 ID 时为 null', async () => {
   const c = client()
   const api = c.load('@/api/upload')
   const id = await upload(c, '原录音.mp3', '20261017.mp3')
-  assert.equal(await api.submitTask([id], 12.2, c.token), undefined)
+  assert.equal(await api.submitTask([id], 12.2, c.token), null)
   assert.equal(c.calls.length, 1)
   const call = c.calls[0]
   assert.match(call.url, /\/audio_translation\/add\?token=/)
@@ -177,6 +275,15 @@ test('单音频提交填对源文件名与返回名，不查列表也不伪造�
   assert.equal(body.get('picture_names'), '')
   assert.equal(c.uploads[0].name, 'file')
   assert.match(c.uploads[0].url, /upload_file\?token=/)
+})
+
+test('add 返回任务 ID：数字、数字字符串与对象形态都能取出新记录 ID', async () => {
+  for (const data of [42, '42', { audio_translation_id: 42 }, { id: 42 }]) {
+    const c = client({ respond: () => ({ code: 200, data, msg: null }) })
+    const api = c.load('@/api/upload')
+    const id = await upload(c, '原录音.mp3', '20261017.mp3')
+    assert.equal(await api.submitTask([id], 1, c.token), 42)
+  }
 })
 
 test('六张图片按原顺序提交，音频字段为空', async () => {
@@ -193,7 +300,7 @@ test('六张图片按原顺序提交，音频字段为空', async () => {
   assert.equal(body.get('audio_duration'), '0')
 })
 
-test('禁止混合、多音频、七张图及空文件提交', async () => {
+test('允许音频与图片混合提交，仍禁止多音频、七张图及空文件', async () => {
   const c = client()
   const api = c.load('@/api/upload')
   const audio = await upload(c, 'a.mp3')
@@ -201,9 +308,18 @@ test('禁止混合、多音频、七张图及空文件提交', async () => {
   const images = []
   for (let i = 0; i < 7; i++)
     images.push(await upload(c, `${i}.jpg`))
-  for (const ids of [[], [audio, second], [audio, images[0]], images])
+  for (const ids of [[], [audio, second], images])
     await assert.rejects(api.submitTask(ids, 1, c.token))
   assert.equal(c.calls.length, 0)
+
+  // 一段录音与图片可以同批提交，字段各归各位
+  await api.submitTask([audio, images[0], images[1]], 5, c.token)
+  const body = new URLSearchParams(c.calls[0].data)
+  assert.equal(body.get('audio'), 'stored-a.mp3')
+  assert.equal(body.get('audio_name'), 'a.mp3')
+  assert.equal(body.get('audio_duration'), '5')
+  assert.equal(body.get('pictures'), 'stored-0.jpg,stored-1.jpg')
+  assert.equal(body.get('picture_names'), '0.jpg,1.jpg')
 })
 
 test('上传端限制 MP3/JPG/PNG 和单文件 10MB，拒绝空文件', async () => {
@@ -267,6 +383,20 @@ test('PDF 只传 token、不携带 cookie；当前返回的是真 PDF 才生成�
   assert.equal(result.downloadUrl, 'blob:pdf')
 })
 
+test('PDF 导出带上 audio_translation_id，token 仍在 URL 上', async () => {
+  let requested
+  const c = client({ globals: {
+    document: {},
+    fetch: async (...args) => {
+      requested = args
+      return new Response('%PDF-1.4 test', { headers: { 'content-type': 'application/pdf' } })
+    },
+    URL: { createObjectURL: () => 'blob:pdf' },
+  } })
+  await c.load('@/api/record').fetchExportDownload(1, c.token, 88)
+  assert.equal(requested[0], 'http://localhost:8081/pdf/export?token=test-token&audio_translation_id=88')
+})
+
 test('PDF 接口返回 HTTP 200 的鉴权 JSON 时不能保存为 PDF', async () => {
   const c = client({ globals: {
     document: {},
@@ -288,8 +418,9 @@ test('本次修改的 Vue 组件和页面可独立编译，不执行全局 build
     assert.equal(result.errors.length, 0, relative)
   }
   const source = fs.readFileSync(path.join(__dirname, '../src/components/SentenceItem.vue'), 'utf8')
-  assert.match(source, /model_ids/)
-  assert.match(source, /hit_texts/)
+  assert.doesNotMatch(source, /model_ids/)
+  assert.doesNotMatch(source, /hit_texts/)
+  assert.match(source, /sentence\.rules/)
   assert.doesNotMatch(source, /v-html/)
 })
 

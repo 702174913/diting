@@ -18,9 +18,9 @@ try {
 catch {
   throw new Error('生产构建必须设置完整的 VITE_BASE_URL（https://真实业务域名）')
 }
-if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash
+if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash
   || !url.hostname || /(?:^|\.)example\.(?:com|org|net)$|localhost|127\.0\.0\.1/i.test(url.hostname)) {
-  throw new Error('生产接口地址必须是 HTTPS 真实业务域名，不能使用示例、本地地址或带凭据的 URL')
+  throw new Error('生产接口地址必须是 HTTP(S) 真实业务域名，不能使用示例、本地地址或带凭据的 URL')
 }
 if (platform === 'mp-weixin' && url.pathname !== '/') {
   throw new Error('小程序接口基础地址仅允许源站，不要带路径')
@@ -54,9 +54,10 @@ if (platform === 'mp-weixin') {
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 })
 }
 try {
-  const uni = path.join(root, 'node_modules/.bin/uni')
+  const isWindows = process.platform === 'win32'
+  const uni = path.join(root, 'node_modules/.bin', isWindows ? 'uni.CMD' : 'uni')
   const args = platform === 'mp-weixin' ? ['build', '-p', 'mp-weixin'] : ['build']
-  const result = spawnSync(uni, args, { cwd: root, env: envForBuild, stdio: 'inherit' })
+  const result = spawnSync(uni, args, { cwd: root, env: envForBuild, stdio: 'inherit', shell: isWindows })
   if (result.error)
     throw result.error
   process.exitCode = result.status ?? 1

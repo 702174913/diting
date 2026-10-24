@@ -8,7 +8,7 @@
   "h5": {
     "title": "谛听",
     "router": {
-      "base": "/"
+      "base": "/h5/"
     }
   },
   "app-plus": {

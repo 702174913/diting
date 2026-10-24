@@ -4,8 +4,8 @@
  * 定稿要求把「交出去会发生什么」讲在前面：三步说明 + 四条录音承诺，
  * 再给一个唯一的主行动按钮。
  *
- * 本页只负责「交出去」：提交成功给提示并返回 pages/history/index（记录列表），
- * 进度、结果与失败重传都由它讲，这里不再内联第二份进度。
+ * 本页只负责「交出去」：提交成功若拿到新记录 ID 就直接进 pages/report/detail 看进度，
+ * 拿不到 ID 才回 pages/history/index；进度、结果与失败重传都由详情页讲，这里不再内联第二份进度。
  */
 import { onHide } from '@dcloudio/uni-app'
 import { computed, onUnmounted, ref } from 'vue'
@@ -25,7 +25,7 @@ import { readAudioDurationMs } from '@/utils/audioDuration'
 import { messageOf } from '@/utils/errors'
 import { newIdempotencyKey } from '@/utils/idempotency'
 import { useUserStore } from '@/stores/user'
-import type { ChosenFile, UploadMode } from '@/utils/choose'
+import type { ChosenFile } from '@/utils/choose'
 import { MAX_IMAGES, chooseAudioFile, chooseImages, isImage, releaseChosenFile } from '@/utils/choose'
 import shieldSage from '@/static/icons/shield-sage.png'
 import { requireH5Login } from '@/utils/h5Auth'
@@ -34,11 +34,9 @@ const userStore = useUserStore()
 
 const sheetVisible = ref(false)
 /**
- * 这次要交的东西只有一种：录音一段，或图片最多 6 张（S16 的混合提交已按产品要求取消）。
- * tab 就是「交哪种」，切 tab 等于换交法，旧的整批作废。
+ * 本次要提交的文件：录音最多一段，图片最多 6 张，两者可以一起交。
+ * 数组里录音恒在最前，其余按下标即图片在记录里的顺序。
  */
-const mode = ref<UploadMode>('audio')
-/** 本次要提交的文件：录音 ≤1（S16）；顺序即图片在记录里的顺序 */
 const pendingFiles = ref<ChosenFile[]>([])
 interface UploadAttempt {
   key: string
@@ -55,7 +53,7 @@ const uploadStage = ref('')
 const uploadPercent = ref<number | null>(null)
 /** 剩余份数：0 时不允许提交，直接给出去处 */
 const remaining = ref<number | null>(null)
-const maxMinutes = ref<number | null>(null)
+const maxSeconds = ref<number | null>(null)
 
 /**
  * 预签名失效时刷新同一上传会话，只重试一次，避免重复提交。
@@ -82,34 +80,22 @@ async function putWithRefresh(sign: UploadSign, filePath: string, token: string)
 const audioSelected = computed(() => pendingFiles.value.find(file => !isImage(file)) ?? null)
 const imageSelected = computed(() => pendingFiles.value.filter(isImage))
 
-/** 同意弹层上的一句话摘要：让用户清楚这次要交出去什么（只会有一种） */
+/** 同意弹层上的一句话摘要：说清这次要交出去什么（可能录音、图片都有） */
 const pendingSummary = computed(() => {
-  if (mode.value === 'audio') {
-    return audioSelected.value ? `录音 1 个（${audioSelected.value.name}）` : ''
+  const parts: string[] = []
+  if (audioSelected.value) {
+    parts.push(`录音 1 个（${audioSelected.value.name}）`)
   }
   const count = imageSelected.value.length
-  return count > 0 ? `图片 ${count} 张` : ''
+  if (count > 0) {
+    parts.push(`图片 ${count} 张`)
+  }
+  return parts.join('，')
 })
 
-/**
- * 切 tab 就是换这次要交的东西：两种不能一起交，所以旧的整批释放掉，
- * 并明确告诉用户移除了什么——留着不说会让人以为交了两样。
- */
-function switchMode(next: UploadMode) {
-  if (next === mode.value || !canChangeFiles()) {
-    return
-  }
-  const dropped = pendingFiles.value.length
-  pendingFiles.value.forEach(releaseChosenFile)
-  pendingFiles.value = []
-  attempt.value = null
-  mode.value = next
-  if (dropped > 0) {
-    uni.showToast({
-      title: next === 'audio' ? '已切到录音，之前选的图片已移除' : '已切到图片，之前选的录音已移除',
-      icon: 'none',
-    })
-  }
+/** 录音恒在最前，图片保持原有顺序；两类同批提交，互不覆盖。 */
+function composePending(audio: ChosenFile | null, images: ChosenFile[]): ChosenFile[] {
+  return audio ? [audio, ...images] : [...images]
 }
 
 function canChangeFiles() {
@@ -123,7 +109,7 @@ function canChangeFiles() {
   return true
 }
 
-/** 选录音：替换已选的那一段；图片与录音二选一，这里不会再带上图片 */
+/** 选录音：替换已选的那一段，已选图片照旧带上，两类可以一起交 */
 async function chooseFile() {
   if (!canChangeFiles() || !requireH5Login(userStore.token, 'upload')) {
     return
@@ -150,7 +136,7 @@ async function chooseFile() {
     if (audioSelected.value) {
       releaseChosenFile(audioSelected.value)
     }
-    pendingFiles.value = [file]
+    pendingFiles.value = composePending(file, imageSelected.value)
     attempt.value = null
   }
   catch (error) {
@@ -167,7 +153,7 @@ async function chooseFile() {
   }
 }
 
-/** 选图片：最多 6 张，可多选；与已选图片合并（重复路径只留一份）；不会再带上录音 */
+/** 选图片：最多 6 张，可多选；与已选图片合并（重复路径只留一份），已选录音照旧保留 */
 async function chooseImageFiles() {
   if (!canChangeFiles() || !requireH5Login(userStore.token, 'upload')) {
     return
@@ -202,7 +188,7 @@ async function chooseImageFiles() {
         merged.push(file)
       }
     }
-    pendingFiles.value = merged
+    pendingFiles.value = composePending(audioSelected.value, merged)
     attempt.value = null
   }
   catch (error) {
@@ -217,18 +203,18 @@ async function precheckQuota(requireAudioLimit = false) {
   try {
     const quota = await fetchQuota(userStore.token)
     remaining.value = quota.remaining
-    maxMinutes.value = quota.maxRecordingMinutes
+    maxSeconds.value = quota.maxRecordingSeconds
     if (quota.remaining <= 0) {
       uni.showToast({ title: '今天的免费份数用完了，明天再来', icon: 'none' })
       return false
     }
-    if (requireAudioLimit && (!Number.isFinite(quota.maxRecordingMinutes) || quota.maxRecordingMinutes <= 0)) {
+    if (requireAudioLimit && (!Number.isFinite(quota.maxRecordingSeconds) || quota.maxRecordingSeconds <= 0)) {
       throw new Error('无效的录音时长上限')
     }
   }
   catch {
     if (requireAudioLimit) {
-      maxMinutes.value = null
+      maxSeconds.value = null
       uni.showToast({ title: '暂时无法获取录音时长上限，请稍后重试', icon: 'none' })
       return false
     }
@@ -245,11 +231,11 @@ async function checkAudioLimit(file: ChosenFile) {
       throw new Error('无法读取录音时长，请换一个受支持的录音文件后重试')
     }
     file.durationMs = duration
-    if (maxMinutes.value === null) {
+    if (maxSeconds.value === null) {
       return false
     }
-    if (duration > maxMinutes.value * 60_000) {
-      uni.showToast({ title: `录音超过 ${maxMinutes.value} 分钟上限，请换一段`, icon: 'none' })
+    if (duration > maxSeconds.value * 1000) {
+      uni.showToast({ title: `录音超过 ${maxSeconds.value} 秒上限，请换一段`, icon: 'none' })
       return false
     }
     return true
@@ -316,12 +302,12 @@ async function confirmUpload() {
     return
   }
   // 正式提交前再检查一次当前配置。
-  if (!attempt.value?.submitted && !(await precheckQuota(mode.value === 'audio'))) {
+  if (!attempt.value?.submitted && !(await precheckQuota(!!audioSelected.value))) {
     sheetVisible.value = false
     busy.value = false
     return
   }
-  if (mode.value === 'audio' && !attempt.value?.submitted
+  if (!attempt.value?.submitted
     && audioSelected.value && !(await checkAudioLimit(audioSelected.value))) {
     sheetVisible.value = false
     busy.value = false
@@ -335,7 +321,7 @@ async function confirmUpload() {
   uploadPercent.value = null
   try {
     // 逐个上传并确认已取得返回文件名；任一失败不登记半个任务。
-    if (mode.value === 'audio' && currentAttempt.declaredDuration === undefined && audioSelected.value?.durationMs) {
+    if (currentAttempt.declaredDuration === undefined && audioSelected.value?.durationMs) {
       currentAttempt.declaredDuration = Math.ceil(audioSelected.value.durationMs / 1000)
     }
     const uploadIds: number[] = []
@@ -367,16 +353,16 @@ async function confirmUpload() {
     }
     uploadStage.value = '登记中…'
     currentAttempt.submitted = true
-    await submitTask(uploadIds, currentAttempt.declaredDuration, token, currentAttempt.key)
+    const id = await submitTask(uploadIds, currentAttempt.declaredDuration, token, currentAttempt.key)
     uploadStage.value = ''
     sheetVisible.value = false
     files.forEach(releaseChosenFile)
     pendingFiles.value = []
     attempt.value = null
-    // add 不返回记录 ID：成功后返回列表，不猜测最新一条属于本次提交。
+    // add 现在返回新记录 ID：直接进详情页看进度；拿不到 ID 才回记录列表，不猜测最新一条。
     // 小延迟是为了让 toast 在真机上先显示出来；跳转失败就留在本页，记录可在「记录」里找到。
     uni.showToast({ title: '上传成功', icon: 'success', duration: 1500 })
-    scheduleOpenHistory()
+    scheduleOpenResult(id)
   }
   catch (e) {
     if (e instanceof ApiError && e.code !== 0 && e.code < 500 && attempt.value) {
@@ -400,11 +386,16 @@ function cancelJump() {
   }
 }
 
-/** 提示 + 跳转是一个动作：先给 toast 留出可见时间，再回记录列表 */
-function scheduleOpenHistory() {
+/** 提示 + 跳转是一个动作：先给 toast 留出可见时间，再进新记录的详情页 */
+function scheduleOpenResult(id: number | null) {
   cancelJump()
   jumpTimer = setTimeout(() => {
     jumpTimer = null
+    if (id && id > 0) {
+      uni.navigateTo({ url: `/pages/report/detail?id=${id}` })
+      return
+    }
+    // 后端未返回记录 ID：回记录列表，不猜测最新一条属于本次提交
     uni.switchTab({ url: '/pages/history/index' })
   }, 900)
 }
@@ -432,11 +423,9 @@ onUnmounted(() => {
       :busy="busy"
       :upload-stage="uploadStage"
       :upload-percent="uploadPercent"
-      :mode="mode"
       :pending-files="pendingFiles"
       :pending-summary="pendingSummary"
       :sheet-visible="sheetVisible"
-      @change-mode="switchMode"
       @choose-audio="chooseFile"
       @choose-images="chooseImageFiles"
       @remove-file="removeFile"

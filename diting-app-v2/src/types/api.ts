@@ -32,6 +32,31 @@ export interface TaskItem {
   reportPublished?: boolean
 }
 
+export interface LegalProvision {
+  id: number
+  name: string
+  which: string
+  content: string
+}
+
+export interface HitRule {
+  modelId: number
+  serialNumber: string
+  violationType: string
+  violationName: string
+  provisions: LegalProvision[]
+}
+
+/** 问题清单里的匹配项：直接来自 match_result / picture_match_results */
+export interface MatchItem {
+  id: number
+  source: 'AUDIO' | 'IMAGE'
+  speaker: string
+  content: string
+  hitTexts: string[]
+  rules: HitRule[]
+}
+
 /** 高亮区间：原文 UTF-16、左闭右开，直接可 slice */
 export interface SentenceRange {
   sentenceId: number | null
@@ -51,6 +76,8 @@ export interface Sentence {
   hasTiming?: boolean
   modelIds?: number[]
   hitTexts?: string[]
+  /** 命中规则的明细（含法条条款）；model_ids 只用于兼容历史数据 */
+  rules?: HitRule[]
   /** 历史报告的业务角色；新任务不推断身份，界面直接展示 SpeakerId */
   role: 'AGENT' | 'CUSTOMER' | 'UNKNOWN' | null
   startMs: number
@@ -115,6 +142,8 @@ export interface ReportDetail {
   notes: string[]
   sentences: Sentence[]
   violations: Violation[]
+  /** 问题 tab 直接展示的匹配项 */
+  matches: MatchItem[]
 }
 
 export interface UploadSign {
@@ -178,6 +207,6 @@ export interface QuotaSnapshot {
   reserved: number
   consumed: number
   remaining: number
-  maxRecordingMinutes: number
+  maxRecordingSeconds: number
   riskThreshold: number
 }

@@ -56,7 +56,7 @@ export async function fetchQuota(_token: string): Promise<QuotaSnapshot> {
     reserved: 0,
     consumed: 0,
     remaining: limit,
-    maxRecordingMinutes: toPositiveInt(config['最长录音时长'], 120),
+    maxRecordingSeconds: toPositiveInt(config['最长录音时长'], 300),
     riskThreshold: toPositiveInt(config['风险阈值'], 0),
   }
 }
@@ -110,13 +110,13 @@ export function completeUpload(uploadId: number, _token: string): Promise<Upload
   })
 }
 
-/** 同次提交只允许一段 MP3 或最多六张图片；成功不查列表、不猜记录 ID。 */
+/** 同次提交允许最多一段 MP3 与最多六张图片（可混合）；返回后端给出的新记录 ID（拿不到时为 null）。 */
 export async function submitTask(
   uploadIds: number[],
   declaredDurationSec: number | undefined,
   token: string,
   _idempotencyKey?: string,
-): Promise<void> {
+): Promise<number | null> {
   if (uploadIds.length === 0) {
     throw new ApiError(400, '没有可提交的文件，请重新上传')
   }
@@ -129,12 +129,12 @@ export async function submitTask(
   })
   const audio = files.filter(file => /\.mp3$/i.test(file.originalName))
   const pictures = files.filter(file => /\.(jpg|png)$/i.test(file.originalName))
-  if (audio.length + pictures.length !== files.length || (audio.length && pictures.length)
+  if (audio.length + pictures.length !== files.length
     || audio.length > 1 || pictures.length > MAX_IMAGES) {
-    throw new ApiError(422, '请分类提交：一个 MP3 音频或最多六张 JPG/PNG 图片')
+    throw new ApiError(422, '请提交最多一段 MP3 音频和最多六张 JPG/PNG 图片')
   }
   // 不选的类别传空串；文件名只作展示，上传返回名必须原样交给后端。
-  await addAudioTranslation({
+  const id = await addAudioTranslation({
     picture_names: pictures.map(file => file.originalName).join(','),
     pictures: pictures.map(file => file.fileName).join(','),
     audio_name: audio[0]?.originalName ?? '',
@@ -142,10 +142,11 @@ export async function submitTask(
     audio_duration: audio.length && Number.isFinite(declaredDurationSec)
       ? Math.max(0, Math.ceil(declaredDurationSec!)) : 0,
   }, token)
-  uploadIds.forEach((id) => {
-    uploads.delete(id)
-    signs.delete(id)
+  uploadIds.forEach((uploadId) => {
+    uploads.delete(uploadId)
+    signs.delete(uploadId)
   })
+  return id
 }
 
 interface UploadFileResult {

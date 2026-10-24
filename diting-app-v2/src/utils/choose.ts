@@ -13,10 +13,9 @@ export interface ChosenFile {
 }
 
 /**
- * 一次提交只交一种：一段录音，或最多 6 张图片。
- * 录音与图片分类提交，不能混合。
+ * 一次提交可混合：最多一段录音，加上最多 6 张图片。
+ * 两类文件都走同一提交会话，由后端分类处理。
  */
-export type UploadMode = 'audio' | 'image'
 
 /** 选择后统一判定图片，页面逻辑与选择列表使用同一格式口径。 */
 export function isImage(file: Pick<ChosenFile, 'name'>): boolean {

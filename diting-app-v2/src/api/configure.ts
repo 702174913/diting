@@ -13,6 +13,7 @@ export interface ConfigureItem {
 
 let cached: Promise<ConfigureItem[]> | null = null
 let cachedToken = ''
+let publicCached: Promise<ConfigureItem[]> | null = null
 
 /** 只缓存同一身份的成功请求；失败可重试，登录前不发受保护请求。 */
 export function fetchConfigure(token = getToken()): Promise<ConfigureItem[]> {
@@ -35,9 +36,26 @@ export function fetchConfigure(token = getToken()): Promise<ConfigureItem[]> {
   return cached
 }
 
+/** 公开配置：协议正文在登录前也要读取，接口本身允许无 token 访问。 */
+export function fetchPublicConfigure(): Promise<ConfigureItem[]> {
+  if (!publicCached) {
+    const pending = request<ConfigureItem[]>({ url: '/configure/list', token: '' })
+      .then(items => Array.isArray(items) ? items : [])
+      .catch((error) => {
+        if (publicCached === pending) {
+          publicCached = null
+        }
+        throw error
+      })
+    publicCached = pending
+  }
+  return publicCached
+}
+
 export function clearConfigureCache(): void {
   cached = null
   cachedToken = ''
+  publicCached = null
 }
 
 /** 转成 配置项名称 -> 值 的字典；拿不到时返回空对象，调用方用兜底值 */

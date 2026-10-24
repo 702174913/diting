@@ -1,6 +1,7 @@
 <script setup lang="ts">
-/** 纯文本展示识别结果及原始 model_ids / hit_texts，不推断规则名称。 */
+/** 纯文本展示识别结果；命中时列出规则与对应法条条款，不展示内部规则 ID。 */
 import { computed } from 'vue'
+import RuleList from '@/components/RuleList.vue'
 import type { Sentence } from '@/types/api'
 import { formatClock } from '@/utils/format'
 import { displaySentenceNote } from '@/utils/reportNotes'
@@ -55,8 +56,7 @@ const parts = computed(() => {
     <text class="f-q">
       <text v-for="(part, index) in parts" :key="index" :class="{ 'f-hl': part.hit }">{{ part.text }}</text>
     </text>
-    <text v-if="sentence.modelIds?.length" class="f-note">model_ids：{{ sentence.modelIds.join(', ') }}</text>
-    <text v-if="sentence.hitTexts?.length" class="f-note">hit_texts：{{ sentence.hitTexts.join('、') }}</text>
+    <RuleList :rules="sentence.rules ?? []" />
     <text v-for="(note, index) in sentence.notes" :key="`n-${index}`" class="f-note">{{ displaySentenceNote(note) }}</text>
   </view>
 </template>

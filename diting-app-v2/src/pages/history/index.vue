@@ -148,7 +148,9 @@ onShow(load)
         {{ loadingMore ? '加载中…' : '看更早的记录' }}
       </button>
     </view>
-    <text v-else-if="records.length > 0" class="muted load-end">没有更多了</text>
+    <view v-else-if="records.length > 0" class="load-end">
+      <text class="muted">没有更多了</text>
+    </view>
   </view>
 </template>
 
@@ -161,5 +163,10 @@ onShow(load)
 
 .greet-l {
   flex: 1;
+}
+
+.load-end {
+  margin: 14px 20px 0;
+  text-align: center;
 }
 </style>

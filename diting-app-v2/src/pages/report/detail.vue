@@ -17,10 +17,12 @@
 import { onHide, onLoad, onShow, onUnload } from '@dcloudio/uni-app'
 import { computed, ref } from 'vue'
 import SentenceItem from '@/components/SentenceItem.vue'
+import MatchCard from '@/components/MatchCard.vue'
 import ReportOverview from '@/components/ReportOverview.vue'
 import ReportExportActions from '@/components/ReportExportActions.vue'
 import ProcessingCard from '@/components/ProcessingCard.vue'
-import { createExport, fetchAssets, fetchExportDownload, fetchReport, fetchTaskStatus, validateDownloadedPdf, waitExport } from '@/api/record'
+import { createExport, fetchAssets, fetchExportDownload, fetchExportPdfBytes, fetchOriginalBytes, fetchReport, fetchTaskStatus, validateDownloadedPdf, waitExport } from '@/api/record'
+import { createZip } from '@/utils/zip'
 import { useUserStore } from '@/stores/user'
 import { formatDateTime } from '@/utils/format'
 import { exportArtifactName } from '@/utils/exportArtifact'
@@ -56,6 +58,106 @@ const statusHint = ref('')
 const ready = ref(false)
 let visible = false
 const images = computed(() => assets.value.filter(item => item.kind === 'IMAGE'))
+const audioAsset = computed(() => assets.value.find(item => item.kind === 'AUDIO') ?? null)
+const audioUrl = computed(() => audioAsset.value?.url ?? '')
+const audioPlaying = ref(false)
+const audioError = ref('')
+const audioCurrent = ref(0)
+const audioDuration = ref(0)
+/** 真实时长未就绪时先用报告里的时长，避免初次渲染滑块区间为 0 */
+const audioTotal = computed(() => audioDuration.value > 0
+  ? audioDuration.value
+  : (report.value?.durationSec ?? 0))
+let audioSeeking = false
+let audioContext: ReturnType<typeof uni.createInnerAudioContext> | null = null
+let audioContextUrl = ''
+
+function audioClock(seconds: number): string {
+  const total = Math.max(0, Math.floor(seconds || 0))
+  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
+}
+
+function ensureAudioContext(): ReturnType<typeof uni.createInnerAudioContext> {
+  if (audioContext) {
+    return audioContext
+  }
+  const context = uni.createInnerAudioContext()
+  context.onPlay(() => {
+    audioPlaying.value = true
+    audioError.value = ''
+  })
+  context.onPause(() => {
+    audioPlaying.value = false
+  })
+  context.onStop(() => {
+    audioPlaying.value = false
+  })
+  context.onEnded(() => {
+    audioPlaying.value = false
+    audioCurrent.value = 0
+  })
+  context.onCanplay(() => {
+    if (Number.isFinite(context.duration) && context.duration > 0) {
+      audioDuration.value = context.duration
+    }
+  })
+  context.onTimeUpdate(() => {
+    if (audioSeeking) {
+      return
+    }
+    audioCurrent.value = context.currentTime
+    if (Number.isFinite(context.duration) && context.duration > 0) {
+      audioDuration.value = context.duration
+    }
+  })
+  context.onError(() => {
+    audioPlaying.value = false
+    audioError.value = '录音加载失败，请稍后重试'
+  })
+  audioContext = context
+  return context
+}
+
+function onAudioChanging(event: { detail: { value: number } }) {
+  audioSeeking = true
+  audioCurrent.value = event.detail.value
+}
+
+function onAudioChange(event: { detail: { value: number } }) {
+  audioSeeking = false
+  const url = audioUrl.value
+  if (!url) {
+    return
+  }
+  const context = ensureAudioContext()
+  if (audioContextUrl !== url) {
+    context.src = url
+    audioContextUrl = url
+  }
+  context.seek(event.detail.value)
+  audioCurrent.value = event.detail.value
+}
+
+function toggleAudio() {
+  const url = audioUrl.value
+  if (!url) {
+    return
+  }
+  const context = ensureAudioContext()
+  if (audioContextUrl !== url) {
+    context.stop()
+    context.src = url
+    audioContextUrl = url
+    audioCurrent.value = 0
+    audioDuration.value = 0
+  }
+  if (audioPlaying.value) {
+    context.pause()
+  }
+  else {
+    context.play()
+  }
+}
 function sourceLabelOf(sourceAssetId: number | null): string | undefined {
   if (sourceAssetId === null || sourceAssetId === undefined) {
     return undefined
@@ -66,7 +168,8 @@ function sourceLabelOf(sourceAssetId: number | null): string | undefined {
 
 const sentenceCount = computed(() => report.value?.sentenceCount ?? report.value?.sentences.length ?? 0)
 /** 有说明的句子即「要留意的话」 */
-const flaggedSentences = computed(() => (report.value?.sentences ?? []).filter(item => item.notes.length > 0))
+/** 问题 tab 直接展示接口的匹配项（match_result / picture_match_results） */
+const matches = computed(() => report.value?.matches ?? [])
 /** 正式报告必须成功发布；失败版本即使有 ID 也不能展示成功结论或导出。 */
 const presentation = computed(() => reportPresentation(report.value))
 const waitingReport = computed(() => !presentation.value.published)
@@ -94,9 +197,9 @@ const callLevelViolations = computed(() => (report.value?.violations ?? []).filt
 /** 对话页：整份原文，命中句同样带高亮，不用在两个 Tab 之间拼上下文 */
 const fullSentences = computed(() => report.value?.sentences ?? [])
 /** 问题页卡片数：通话级缺失项 + 命中句，与概览的「要留意」同一份句子口径 */
-const issueCount = computed(() => callLevelViolations.value.length + flaggedSentences.value.length)
-const originalsAvailable = computed(() => Boolean(report.value?.audioAvailable)
-  || images.value.some(item => !item.purged && Boolean(item.url)))
+const issueCount = computed(() => callLevelViolations.value.length + matches.value.length)
+/** 原件可下载时才允许连同打包：录音或任意图片有可用地址即可。 */
+const originalsAvailable = computed(() => assets.value.some(item => Boolean(item.url)))
 
 async function loadAssets(id: number) {
   const token = userStore.token
@@ -250,6 +353,10 @@ async function save(withAudio: boolean) {
     uni.showToast({ title: '报告成功发布后才能保存', icon: 'none' })
     return
   }
+  if (withAudio) {
+    await saveBundle(current, token, versionId)
+    return
+  }
   exporting.value = true
   // 进度只用 loading 表达，页面不再多占一行文字。
   // 生成阶段不 mask：可能几十秒，页面要能滚动、能点「先去别处」；下载阶段才 mask 防误点。
@@ -277,7 +384,7 @@ async function save(withAudio: boolean) {
     // 状态查询不再返回下载地址：完成后显式调一次 /download 签发（只记一条签发审计）
     let downloadUrl = ''
     try {
-      const download = await fetchExportDownload(exportId, token)
+      const download = await fetchExportDownload(exportId, token, current.id)
       downloadUrl = download.downloadUrl
     }
     catch {
@@ -313,17 +420,74 @@ async function save(withAudio: boolean) {
     // #ifndef H5
     // 小程序端只有下载任务级进度，没有回调百分比：遮罩 loading 到回调里关
     uni.showLoading({ title: '正在下载…', mask: true })
-    if (done.fileType === 'zip') {
-      saveZip(downloadUrl, current.reportNo, versionId)
-    }
-    else {
-      openPdf(downloadUrl)
-    }
+    openPdf(downloadUrl)
     // #endif
   }
   catch (e) {
     uni.hideLoading()
     uni.showToast({ title: messageOf(e), icon: 'none' })
+  }
+  finally {
+    exporting.value = false
+  }
+}
+
+/** 文件名去重：同名原件在压缩包内不能互相覆盖 */
+function uniqueZipName(name: string, used: Set<string>): string {
+  const candidate = name || 'files'
+  if (!used.has(candidate)) {
+    used.add(candidate)
+    return candidate
+  }
+  const dot = candidate.lastIndexOf('.')
+  const stem = dot > 0 ? candidate.slice(0, dot) : candidate
+  const ext = dot > 0 ? candidate.slice(dot) : ''
+  let index = 1
+  while (used.has(`${stem}-${index}${ext}`)) {
+    index++
+  }
+  const result = `${stem}-${index}${ext}`
+  used.add(result)
+  return result
+}
+
+/**
+ * 连同原件打包：先取记录 PDF，再把录音与原图按原件名打进同一个 ZIP。
+ * 原件本身已是压缩格式，ZIP 只做 store；同名原件自动加序号。
+ */
+async function saveBundle(current: ReportDetail, token: string, versionId: number) {
+  exporting.value = true
+  uni.showLoading({ title: '正在打包…' })
+  try {
+    const originals = assets.value.filter(item => Boolean(item.url))
+    if (originals.length === 0) {
+      throw new ApiError(422, '没有可打包的原件')
+    }
+    const used = new Set<string>()
+    const pdfName = exportArtifactName(current.reportNo, versionId, 'pdf')
+    used.add(pdfName)
+    const entries = [{ name: pdfName, data: await fetchExportPdfBytes(current.id, token) }]
+    for (const item of originals) {
+      entries.push({
+        name: uniqueZipName(item.filename, used),
+        data: await fetchOriginalBytes(item.url as string, token),
+      })
+    }
+    const zip = createZip(entries)
+    const fileName = exportArtifactName(current.reportNo, versionId, 'zip')
+    uni.showLoading({ title: '正在保存…', mask: true })
+    // #ifdef H5
+    saveBlobInBrowser(zip, fileName)
+    uni.hideLoading()
+    uni.showToast({ title: '已保存，可在浏览器下载列表里查看', icon: 'none' })
+    // #endif
+    // #ifndef H5
+    await saveZipBytes(zip, fileName)
+    // #endif
+  }
+  catch (error) {
+    uni.hideLoading()
+    uni.showToast({ title: messageOf(error), icon: 'none' })
   }
   finally {
     exporting.value = false
@@ -367,6 +531,13 @@ function saveViaUrl(url: string, fileName: string) {
   anchor.click()
   anchor.remove()
 }
+
+/** 字节流另存为 ZIP：Blob 同源，download 属性生效 */
+function saveBlobInBrowser(data: Uint8Array, fileName: string) {
+  const url = URL.createObjectURL(new Blob([data], { type: 'application/zip' }))
+  saveViaUrl(url, fileName)
+  setTimeout(() => URL.revokeObjectURL(url), 4000)
+}
 // #endif
 
 // #ifndef H5
@@ -398,38 +569,53 @@ function openPdf(url: string) {
   })
 }
 
-/** ZIP 不能 openDocument：微信端转发到聊天保存，其他端退化为保存文件 */
-function saveZip(url: string, reportNo: string, version: number) {
-  uni.downloadFile({
-    url,
-    success: (r) => {
-      uni.hideLoading()
-      const share = (uni as unknown as {
-        shareFileMessage?: (options: {
+/** ZIP 不能 openDocument：微信端转发到聊天保存，其他端写入小程序文件目录 */
+function saveZipBytes(data: Uint8Array, fileName: string): Promise<void> {
+  const wxAny = (globalThis as unknown as {
+    wx?: {
+      env?: { USER_DATA_PATH?: string }
+      getFileSystemManager?: () => {
+        writeFile: (options: {
           filePath: string
-          fileName?: string
-          fail?: () => void
+          data: ArrayBuffer
+          success: () => void
+          fail: () => void
         }) => void
-      }).shareFileMessage
-      if (typeof share === 'function') {
-        share({
-          filePath: r.tempFilePath,
-          // 与后端 Content-Disposition 的文件名口径一致：报告编号-v版本.zip
-          fileName: exportArtifactName(reportNo, version, 'zip'),
-          fail: () => uni.showToast({ title: '保存失败，请重试', icon: 'none' }),
-        })
-        return
       }
-      uni.saveFile({
-        tempFilePath: r.tempFilePath,
-        success: () => uni.showToast({ title: '已保存到小程序文件，可在聊天里转发', icon: 'none' }),
-        fail: () => uni.showToast({ title: '保存失败，请重试', icon: 'none' }),
-      })
-    },
-    fail: () => {
-      uni.hideLoading()
-      uni.showToast({ title: '下载失败，请重试', icon: 'none' })
-    },
+    }
+  }).wx
+  const fs = wxAny?.getFileSystemManager?.()
+  const dir = wxAny?.env?.USER_DATA_PATH
+  if (!fs?.writeFile || !dir) {
+    uni.hideLoading()
+    uni.showToast({ title: '当前平台暂不支持保存压缩包', icon: 'none' })
+    return Promise.resolve()
+  }
+  const filePath = `${dir}/${fileName}`
+  const buffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)
+  return new Promise((resolve, reject) => {
+    fs.writeFile({
+      filePath,
+      data: buffer,
+      success: () => {
+        uni.hideLoading()
+        const share = (uni as unknown as {
+          shareFileMessage?: (options: { filePath: string, fileName?: string, fail?: () => void }) => void
+        }).shareFileMessage
+        if (typeof share === 'function') {
+          share({
+            filePath,
+            fileName,
+            fail: () => uni.showToast({ title: '保存失败，请重试', icon: 'none' }),
+          })
+        }
+        else {
+          uni.showToast({ title: '已保存到小程序文件，可在聊天里转发', icon: 'none' })
+        }
+        resolve()
+      },
+      fail: () => reject(new ApiError(500, '保存压缩包失败，请重试')),
+    })
   })
 }
 // #endif
@@ -470,11 +656,15 @@ onShow(() => {
 onHide(() => {
   visible = false
   polling.stop()
+  audioContext?.pause()
 })
 
 onUnload(() => {
   visible = false
   polling.stop()
+  audioContext?.destroy()
+  audioContext = null
+  audioContextUrl = ''
 })
 </script>
 
@@ -521,7 +711,50 @@ onUnload(() => {
       />
 
       <text class="lead">{{ lead }}</text>
-      <text v-for="(note, index) in report.notes" :key="`report-note-${index}`" class="hint">{{ note }}</text>
+      <view
+        v-for="(note, index) in report.notes"
+        :key="`report-note-${index}`"
+        class="report-note"
+      >
+        <text>{{ note }}</text>
+      </view>
+
+      <view v-if="audioAsset" class="audio-card">
+        <view class="audio-head">
+          <view class="audio-meta">
+            <text class="audio-title">原录音</text>
+            <text class="audio-name">{{ audioAsset.filename }}</text>
+          </view>
+          <button
+            class="btn btn-soft audio-btn"
+            :disabled="!audioUrl"
+            @click="toggleAudio"
+          >
+            {{ audioPlaying ? '暂停' : '试听' }}
+          </button>
+        </view>
+        <view v-if="audioUrl" class="audio-progress">
+          <text class="audio-time">{{ audioClock(audioCurrent) }}</text>
+          <view v-if="audioTotal > 0" class="audio-slider">
+            <slider
+              :min="0"
+              :max="audioTotal"
+              :value="audioCurrent"
+              :step="1"
+              block-size="14"
+              active-color="#b05526"
+              @changing="onAudioChanging"
+              @change="onAudioChange"
+            />
+          </view>
+          <view v-else class="audio-slider audio-slider-empty">
+            <text class="audio-loading">加载中…</text>
+          </view>
+          <text class="audio-time">{{ audioClock(audioTotal) }}</text>
+        </view>
+      </view>
+      <text v-if="audioAsset && !audioUrl" class="hint audio-hint">原录音地址暂不可用，无法试听。</text>
+      <text v-if="audioError" class="hint audio-hint">{{ audioError }}</text>
 
       <!-- 尚未发布时只展示转写；说话人编号直接来自听悟 SpeakerId。 -->
       <template v-if="waitingReport">
@@ -589,11 +822,10 @@ onUnload(() => {
             <text class="f-note">{{ displayViolationNote(item.note) }}</text>
             <text v-if="item.deduct !== null" class="hint">规则扣分：{{ item.deduct }}</text>
           </view>
-          <SentenceItem
-            v-for="sentence in flaggedSentences"
-            :key="sentence.id"
-            :sentence="sentence"
-            :source-label="sourceLabelOf(sentence.sourceAssetId)"
+          <MatchCard
+            v-for="item in matches"
+            :key="`match-${item.id}`"
+            :match="item"
           />
           <view v-if="issueCount === 0" class="find pass">
             <text class="f-ts">
@@ -742,6 +974,91 @@ onUnload(() => {
   margin-top: 10px;
   font-size: 12px;
   color: var(--ink-3);
+}
+
+/* 报告级提示：用块级容器保证各端都能撑开外边距、按正文同宽居中 */
+.report-note {
+  margin: 0 20px 14px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--ink-3);
+  text-align: center;
+}
+
+.audio-card {
+  margin: 0 20px 16px;
+  padding: 12px 14px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md, 10px);
+}
+
+.audio-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.audio-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.audio-title {
+  display: block;
+  font-size: 14px;
+  color: var(--ink);
+}
+
+.audio-name {
+  display: block;
+  margin-top: 3px;
+  font-size: 11.5px;
+  color: var(--ink-3);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.audio-btn {
+  flex: none;
+  min-width: 68px;
+  margin: 0;
+}
+
+.audio-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.audio-slider {
+  flex: 1;
+  margin: 0;
+}
+
+.audio-slider-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.audio-loading {
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+.audio-time {
+  flex: none;
+  width: 40px;
+  font-size: 11px;
+  color: var(--ink-3);
+  text-align: center;
+}
+
+.audio-hint {
+  margin: -8px 20px 14px;
 }
 
 /* 处理中：这一屏只有卡、提示和按钮 */

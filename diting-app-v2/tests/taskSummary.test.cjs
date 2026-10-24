@@ -6,11 +6,22 @@ const vm = require('node:vm')
 const ts = require('typescript')
 const { parse, compileScript, compileTemplate } = require('@vue/compiler-sfc')
 
-const ctx = { exports: {} }
-vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname, '../src/utils/taskSummary.ts'), 'utf8'), {
-  compilerOptions: { module: ts.ModuleKind.CommonJS },
-}).outputText, ctx)
-const { taskSummary } = ctx.exports
+function loadTs(file) {
+  const exports = {}
+  const ctx = {
+    exports,
+    require: (name) => {
+      if (name === '@/utils/taskStatus')
+        return loadTs(path.join(__dirname, '../src/utils/taskStatus.ts'))
+      throw new Error(`unexpected require: ${name}`)
+    },
+  }
+  vm.runInNewContext(ts.transpileModule(fs.readFileSync(file, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS },
+  }).outputText, ctx)
+  return exports
+}
+const { taskSummary } = loadTs(path.join(__dirname, '../src/utils/taskSummary.ts'))
 
 test('列表使用违规总数，零命中句的通话级问题也不能显示绿色无问题', () => {
   const view = taskSummary({ status: 'COMPLETED', reportPublished: true, flaggedCount: 0, violationCount: 2 })
@@ -26,6 +37,13 @@ test('失败或处理中的任务不展示无问题结论', () => {
   for (const status of ['FAILED', 'INVALID', 'TRANSCRIBING', 'QUEUED']) {
     assert.equal(taskSummary({ status }).variant, 'run')
   }
+})
+test('处理中按最新阶段展示文案，不再统一为「正在处理」', () => {
+  assert.equal(taskSummary({ status: 'QUEUED' }).text, '排队中')
+  assert.equal(taskSummary({ status: 'TRANSCRIBING' }).text, '正在转写')
+  assert.equal(taskSummary({ status: 'PARSING' }).text, '正在整理文字')
+  assert.equal(taskSummary({ status: 'WAITING_ROLE' }).text, '正在生成报告')
+  assert.equal(taskSummary({ status: 'ANALYZING' }).text, '正在对照规范')
 })
 test('实际卡片绑定新摘要并可编译', () => {
   const filename = path.join(__dirname, '../src/components/RecordCard.vue')
