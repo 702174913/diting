@@ -23,7 +23,7 @@ function harness(bindWechat, options = {}) {
   }).outputText
   const dependencies = {
     vue,
-    '@dcloudio/uni-app': { onShow(callback) { onShowCallback = callback } },
+    '@dcloudio/uni-app': { onShow(callback) { onShowCallback = callback }, onShareAppMessage() {} },
     '@/stores/user': { useUserStore: () => store },
     '@/api/auth': { bindWechat },
     '@/utils/errors': { messageOf: () => '已绑定其他账号' },
@@ -32,6 +32,7 @@ function harness(bindWechat, options = {}) {
       return true
     } },
     '@/utils/deletionReceipt': { getDeletionReceipt: () => options.receipt ?? null },
+    '@/utils/share': { useShareContent: () => () => ({}) },
   }
   const exports = {}
   const uni = {

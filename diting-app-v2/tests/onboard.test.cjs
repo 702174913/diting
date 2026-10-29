@@ -63,7 +63,7 @@ function createHarness(rel, options = {}) {
   const dependencies = {
     'vue': { ...vue, onUnmounted: (cb) => { hooks.onUnmounted = cb } },
     '@dcloudio/uni-app': Object.fromEntries(
-      ['onLoad', 'onShow', 'onHide', 'onUnload'].map(name => [name, (cb) => { hooks[name] = cb }]),
+      ['onLoad', 'onShow', 'onHide', 'onUnload', 'onShareAppMessage'].map(name => [name, (cb) => { hooks[name] = cb }]),
     ),
     '@/stores/user': { useUserStore: () => options.store ?? { token: '', userInfo: null } },
     '@/utils/format': { greeting: () => '今天也在' },

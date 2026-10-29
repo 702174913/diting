@@ -3,7 +3,7 @@
  * Tab 3「记录」——全部听过的话。
  * 每一条都进同一个记录页：处理中它会自己轮询，处理完直接给正式内容。
  */
-import { onShow } from '@dcloudio/uni-app'
+import { onShareAppMessage, onShow } from '@dcloudio/uni-app'
 import { ref } from 'vue'
 import StatusBar from '@/components/StatusBar.vue'
 import RecordCard from '@/components/RecordCard.vue'
@@ -13,6 +13,7 @@ import type { TaskItem } from '@/types/api'
 import { hasMore, mergePage, nextPage } from '@/utils/paging'
 import { messageOf } from '@/utils/errors'
 import { requireH5Login } from '@/utils/h5Auth'
+import { useShareContent } from '@/utils/share'
 
 const userStore = useUserStore()
 const records = ref<TaskItem[]>([])
@@ -20,6 +21,10 @@ const loading = ref(true)
 const loadingMore = ref(false)
 const page = ref(1)
 const more = ref(false)
+
+// #ifdef MP-WEIXIN
+onShareAppMessage(useShareContent('/pages/home/index', '谛听 · 那段通话，有人替你再听一遍'))
+// #endif
 
 /** 重新加载第一页（进入页面、删除后刷新都走这里） */
 async function load() {

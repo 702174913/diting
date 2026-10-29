@@ -15,8 +15,16 @@ function client(options = {}) {
   let uploadResponse = { code: 200, data: 'server.mp3', msg: null }
   const calls = []
   const uploads = []
+  const storage = options.storage ?? {}
   const modules = new Map()
   const uni = {
+    getStorageSync: key => storage[key] ?? '',
+    setStorageSync: (key, value) => {
+      storage[key] = value
+    },
+    removeStorageSync: (key) => {
+      delete storage[key]
+    },
     request(request) {
       calls.push(request)
       Promise.resolve().then(() => options.respond?.(request) ?? { code: 200, data: null, msg: null })
@@ -57,7 +65,7 @@ function client(options = {}) {
   const request = load('@/api/request')
   request.onUnauthorized(() => { unauthorized++ })
   return {
-    load, calls, uploads, request,
+    load, calls, uploads, request, storage,
     setToken: value => { token = value },
     setUpload: data => { uploadResponse = data },
     get token() { return token },
@@ -92,6 +100,35 @@ test('登录使用表单且不附带旧 token，其他请求使用参数 token �
   assert.match(c.calls[1].url, /\?token=test-token$/)
   assert.equal(c.calls[1].withCredentials, false)
   assert.equal(c.calls[1].header.Authorization, undefined)
+})
+
+test('微信 code 登录与账号密码共用表单 /user/login，不带旧 token 和账号密码', async () => {
+  const c = client({ respond: () => ({ code: 200, data: 'wx-jwt', msg: null }) })
+  const result = await c.load('@/api/auth').loginByWechat('wx-code', true, { a: 1 })
+  assert.equal(c.calls.length, 1)
+  assert.equal(c.calls[0].url, 'http://localhost:8081/user/login')
+  assert.equal(c.calls[0].method, 'POST')
+  const body = new URLSearchParams(c.calls[0].data)
+  assert.equal(body.get('code'), 'wx-code')
+  assert.equal(body.get('username'), null)
+  assert.equal(body.get('password'), null)
+  assert.equal(result.token, 'wx-jwt')
+  assert.equal(result.userInfo.hasWechat, true)
+})
+
+test('分享归因：登录表单带 parent_user_id，成功后清除', async () => {
+  const c = client({
+    storage: { diting_parent_user_id: 42 },
+    respond: () => ({ code: 200, data: 'jwt', msg: null }),
+  })
+  await c.load('@/api/auth').loginByPassword('u', 'p')
+  assert.equal(new URLSearchParams(c.calls[0].data).get('parent_user_id'), '42')
+  assert.equal(c.storage.diting_parent_user_id, undefined)
+
+  // 没有归因时不发送空参数
+  const plain = client({ respond: () => ({ code: 200, data: 'jwt', msg: null }) })
+  await plain.load('@/api/auth').loginByWechat('wx-code')
+  assert.equal(new URLSearchParams(plain.calls[0].data).has('parent_user_id'), false)
 })
 
 test('列表页码转换为从 0 起，固定每页 20 条', async () => {
@@ -162,6 +199,27 @@ test('音频和图片结果解析 JSON，保留原始规则 ID 与关键词，�
   assert.deepEqual(plain(report.sentences[0].highlights), [{ sentenceId: 1, start: 0, end: 4 }])
   assert.equal(report.sentences[1].sourceKind, 'IMAGE')
   assert.equal(report.sentences[1].sourceAssetId, null)
+})
+
+test('新接口的 audio_* 字段归一化后照常生成报告', async () => {
+  const c = client({ respond: () => ({ code: 200, data: task({
+    audio_task_id: 'new-cloud-task',
+    audio_task_status: 'COMPLETED',
+    audio_handle_result: JSON.stringify([
+      { speaker: '1', content: '第一句', model_ids: [], models: [], hit_texts: [] },
+      { speaker: '2', content: '第二句', model_ids: [], models: [], hit_texts: [] },
+    ]),
+    audio_match_result: JSON.stringify([
+      { speaker: '2', content: '第二句', model_ids: [7], models: [], hit_texts: ['第二'] },
+    ]),
+    audio_translation_result: 'null',
+  }), msg: null }) })
+  const report = await c.load('@/api/record').fetchReport(12, c.token)
+  assert.equal(report.taskId, 'new-cloud-task')
+  assert.equal(report.sentences.length, 2)
+  assert.equal(report.sentences[1].text, '第二句')
+  assert.deepEqual(plain(report.sentences[1].modelIds), [7])
+  assert.equal(report.flaggedCount, 1)
 })
 
 test('命中句解析 models 并展示规则与法条，重复 model_id 去重', async () => {
@@ -263,7 +321,10 @@ test('单音频提交填对源文件名与返回名，未返回 ID 时为 null',
   const c = client()
   const api = c.load('@/api/upload')
   const id = await upload(c, '原录音.mp3', '20261017.mp3')
-  assert.equal(await api.submitTask([id], 12.2, c.token), null)
+  assert.equal(
+    await api.submitTask([id], 12.2, c.token, 'key', [{ question_id: 1, question_answer_id: 2 }]),
+    null,
+  )
   assert.equal(c.calls.length, 1)
   const call = c.calls[0]
   assert.match(call.url, /\/audio_translation\/add\?token=/)
@@ -273,6 +334,7 @@ test('单音频提交填对源文件名与返回名，未返回 ID 时为 null',
   assert.equal(body.get('audio_duration'), '13')
   assert.equal(body.get('pictures'), '')
   assert.equal(body.get('picture_names'), '')
+  assert.equal(body.get('questions'), '[{"question_id":1,"question_answer_id":2}]')
   assert.equal(c.uploads[0].name, 'file')
   assert.match(c.uploads[0].url, /upload_file\?token=/)
 })

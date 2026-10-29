@@ -5,20 +5,29 @@
  * 协议清单与登录页同源（`/configure/list` 里名称命中协议关键词的条目），
  * 后台增删一份，这里跟着变，前端不写死数量；接口不可用时用同一份兜底清单。
  *
- * 同意 → 进首页，完整功能可用；
+ * 同意 → 已有登录态直接进首页；未登录则用微信 code 登录（与登录页同一接口）后再进首页。
  * 不同意 → 也能进首页浏览，但上传等入口会再引导回本页。
  */
-import { onLoad } from '@dcloudio/uni-app'
+import { onLoad, onShareAppMessage } from '@dcloudio/uni-app'
 import { ref } from 'vue'
 import StatusBar from '@/components/StatusBar.vue'
 import type { AgreementItem } from '@/api/agreement'
 import { fetchAgreements } from '@/api/agreement'
+import { loginByWechat } from '@/api/auth'
+import { useUserStore } from '@/stores/user'
 import { markAgreed, markDeclined } from '@/utils/consentGate'
+import { messageOf } from '@/utils/errors'
+import { captureParentUserId } from '@/utils/referral'
+import { useShareContent } from '@/utils/share'
 
+const userStore = useUserStore()
 const agreements = ref<AgreementItem[]>([])
 const loading = ref(true)
+const busy = ref(false)
+const errorText = ref('')
 
-onLoad(async () => {
+onLoad(async (query) => {
+  captureParentUserId(query)
   try {
     agreements.value = await fetchAgreements()
   }
@@ -26,6 +35,10 @@ onLoad(async () => {
     loading.value = false
   }
 })
+
+// #ifdef MP-WEIXIN
+onShareAppMessage(useShareContent('/pages/home/index', '谛听 · 那段通话，有人替你再听一遍'))
+// #endif
 
 function openAgreement(key: string) {
   uni.navigateTo({ url: `/pages/agreement/index?key=${encodeURIComponent(key)}` })
@@ -40,12 +53,55 @@ function leave() {
   uni.switchTab({ url: '/pages/home/index' })
 }
 
-function agree() {
+/**
+ * 已登录（本地有 token）直接跳过；微信环境用 wx.login 的 code 走与登录页相同的接口。
+ * 非微信端没有可用凭证，不阻断授权流程。
+ */
+async function loginIfNeeded() {
+  if (userStore.token) {
+    return
+  }
+  // #ifdef MP-WEIXIN
+  const code = await new Promise<string>((resolve, reject) => {
+    uni.login({
+      provider: 'weixin',
+      success: res => (res.code ? resolve(res.code) : reject(new Error('未取得微信授权码'))),
+      fail: reject,
+    })
+  })
+  const seenVersions = agreements.value.reduce<Record<string, number>>((acc, item) => {
+    acc[item.key] = item.version
+    return acc
+  }, {})
+  const result = await loginByWechat(code, true, seenVersions)
+  userStore.setLogin(result.token)
+  userStore.userInfo = result.userInfo
+  // #endif
+}
+
+async function agree() {
+  if (busy.value) {
+    return
+  }
+  busy.value = true
+  errorText.value = ''
+  try {
+    await loginIfNeeded()
+  }
+  catch (error) {
+    errorText.value = messageOf(error)
+    busy.value = false
+    return
+  }
+  busy.value = false
   markAgreed()
   leave()
 }
 
 function decline() {
+  if (busy.value) {
+    return
+  }
   markDeclined()
   leave()
 }
@@ -85,12 +141,14 @@ function decline() {
     <view class="acts">
       <button
         class="btn btn-main btn-block"
-        :disabled="loading || agreements.length === 0"
+        :disabled="loading || agreements.length === 0 || busy"
         @click="agree"
       >
-        同意以上 {{ agreements.length }} 份条款
+        <text v-if="busy">正在登录…</text>
+        <text v-else>同意以上 {{ agreements.length }} 份条款</text>
       </button>
-      <button class="btn btn-soft btn-block gate-decline" @click="decline">
+      <text v-if="errorText" class="gate-error" role="alert">{{ errorText }}</text>
+      <button class="btn btn-soft btn-block gate-decline" :disabled="busy" @click="decline">
         不同意，先看看
       </button>
       <text class="gate-note">
@@ -214,6 +272,15 @@ function decline() {
 
 .gate-decline {
   margin-top: 10px;
+}
+
+.gate-error {
+  display: block;
+  margin-top: 10px;
+  font-size: 12.5px;
+  line-height: 1.7;
+  text-align: center;
+  color: #ac3c2a;
 }
 
 .gate-note {

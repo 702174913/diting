@@ -4,7 +4,7 @@
  * 这一屏不卖功能，只回答「你会不会拿我的东西去做别的」。
  * 不该做的事逐条列出，比任何承诺话术都更可信。
  */
-import { onShow } from '@dcloudio/uni-app'
+import { onShareAppMessage, onShow } from '@dcloudio/uni-app'
 import { ref } from 'vue'
 import StatusBar from '@/components/StatusBar.vue'
 import { bindWechat } from '@/api/auth'
@@ -12,9 +12,14 @@ import { messageOf } from '@/utils/errors'
 import { useUserStore } from '@/stores/user'
 import { requireH5Login } from '@/utils/h5Auth'
 import { getDeletionReceipt } from '@/utils/deletionReceipt'
+import { useShareContent } from '@/utils/share'
 
 const userStore = useUserStore()
 const bindingWechat = ref(false)
+
+// #ifdef MP-WEIXIN
+onShareAppMessage(useShareContent('/pages/home/index', '谛听 · 那段通话，有人替你再听一遍'))
+// #endif
 
 /** 一句话里需要加重语气的一段。小程序不支持 v-html，改用嵌套 text 分段渲染 */
 interface Segment {

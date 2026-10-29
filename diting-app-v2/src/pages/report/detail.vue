@@ -14,7 +14,7 @@
  * 轮询纪律：只由 polling 控制器持有定时器（重复进入不叠加），
  * 离开页面（onHide/onUnload）立刻停，终态自动停；隐藏后的登录异步续体不得启动定时器。
  */
-import { onHide, onLoad, onShow, onUnload } from '@dcloudio/uni-app'
+import { onHide, onLoad, onShareAppMessage, onShow, onUnload } from '@dcloudio/uni-app'
 import { computed, ref } from 'vue'
 import SentenceItem from '@/components/SentenceItem.vue'
 import MatchCard from '@/components/MatchCard.vue'
@@ -33,10 +33,15 @@ import { reportPresentation } from '@/utils/reportPresentation'
 import { requireH5Login } from '@/utils/h5Auth'
 import { createPolling } from '@/utils/polling'
 import { isFailed, needsPolling } from '@/utils/taskStatus'
+import { useShareContent } from '@/utils/share'
 import type { AssetItem, ReportDetail, TaskStatus } from '@/types/api'
 import checkSage from '@/static/icons/check-sage.png'
 
 const userStore = useUserStore()
+
+// #ifdef MP-WEIXIN
+onShareAppMessage(useShareContent('/pages/home/index', '谛听 · 那段通话，有人替你再听一遍'))
+// #endif
 const report = ref<ReportDetail | null>(null)
 const loading = ref(true)
 const loadError = ref('')
@@ -569,23 +574,108 @@ function openPdf(url: string) {
   })
 }
 
+interface WxRuntime {
+  env?: { USER_DATA_PATH?: string }
+  getFileSystemManager?: () => {
+    writeFile: (options: {
+      filePath: string
+      data: ArrayBuffer
+      success: () => void
+      fail: () => void
+    }) => void
+  }
+  getSystemInfoSync?: () => { platform?: string }
+  /** 微信原生 API；uni-app 没有对应的 uni.shareFileMessage */
+  shareFileMessage?: (options: {
+    filePath: string
+    fileName?: string
+    success?: () => void
+    fail?: (error?: { errMsg?: string }) => void
+  }) => void
+}
+
+function wxRuntime(): WxRuntime | undefined {
+  return (globalThis as unknown as { wx?: WxRuntime }).wx
+}
+
+/**
+ * 开发者工具与电脑版微信都不支持 shareFileMessage（fail: not supported）。
+ * 域名校验开关只影响 request/downloadFile，与这里无关。
+ */
+function isDesktopWeixin(runtime: WxRuntime | undefined): boolean {
+  const platform = runtime?.getSystemInfoSync?.().platform ?? ''
+  return platform === 'devtools' || platform === 'windows' || platform === 'mac'
+}
+
+/** 转发 ZIP：手机微信才能调起「选择聊天」；失败时尽量把真实原因说清楚 */
+function shareZipFile(runtime: WxRuntime | undefined, filePath: string, fileName: string): Promise<void> {
+  return new Promise((resolve) => {
+    if (isDesktopWeixin(runtime)) {
+      uni.showToast({ title: '开发者工具/电脑版不支持转发文件，请用手机预览', icon: 'none' })
+      resolve()
+      return
+    }
+    const share = runtime?.shareFileMessage
+    if (typeof share !== 'function') {
+      uni.showToast({ title: '当前微信版本不支持转发文件，请升级后重试', icon: 'none' })
+      resolve()
+      return
+    }
+    const send = (retry: boolean) => {
+      share.call(runtime, {
+        filePath,
+        fileName,
+        success: () => resolve(),
+        fail: (error) => {
+          const message = error?.errMsg ?? ''
+          // 用户取消不算失败
+          if (/cancel/i.test(message)) {
+            resolve()
+            return
+          }
+          if (/tap gesture/i.test(message)) {
+            if (retry) {
+              // 前面下载文件用掉了用户手势：弹窗确认后由这次点击重新发起转发
+              uni.showModal({
+                title: '压缩包已生成',
+                content: '在微信里选择一个聊天，即可把压缩包保存或转发出去。',
+                confirmText: '发送',
+                cancelText: '稍后',
+                success: (res) => {
+                  if (res.confirm) {
+                    send(false)
+                  }
+                  else {
+                    resolve()
+                  }
+                },
+                fail: () => resolve(),
+              })
+              return
+            }
+            uni.showToast({ title: '打包完成，请再点一次按钮发送', icon: 'none' })
+            resolve()
+            return
+          }
+          if (/not supported/i.test(message)) {
+            uni.showToast({ title: '当前环境不支持转发文件，请用手机微信打开', icon: 'none' })
+            resolve()
+            return
+          }
+          uni.showToast({ title: '保存失败，请重试', icon: 'none' })
+          resolve()
+        },
+      })
+    }
+    send(true)
+  })
+}
+
 /** ZIP 不能 openDocument：微信端转发到聊天保存，其他端写入小程序文件目录 */
 function saveZipBytes(data: Uint8Array, fileName: string): Promise<void> {
-  const wxAny = (globalThis as unknown as {
-    wx?: {
-      env?: { USER_DATA_PATH?: string }
-      getFileSystemManager?: () => {
-        writeFile: (options: {
-          filePath: string
-          data: ArrayBuffer
-          success: () => void
-          fail: () => void
-        }) => void
-      }
-    }
-  }).wx
-  const fs = wxAny?.getFileSystemManager?.()
-  const dir = wxAny?.env?.USER_DATA_PATH
+  const runtime = wxRuntime()
+  const fs = runtime?.getFileSystemManager?.()
+  const dir = runtime?.env?.USER_DATA_PATH
   if (!fs?.writeFile || !dir) {
     uni.hideLoading()
     uni.showToast({ title: '当前平台暂不支持保存压缩包', icon: 'none' })
@@ -599,20 +689,7 @@ function saveZipBytes(data: Uint8Array, fileName: string): Promise<void> {
       data: buffer,
       success: () => {
         uni.hideLoading()
-        const share = (uni as unknown as {
-          shareFileMessage?: (options: { filePath: string, fileName?: string, fail?: () => void }) => void
-        }).shareFileMessage
-        if (typeof share === 'function') {
-          share({
-            filePath,
-            fileName,
-            fail: () => uni.showToast({ title: '保存失败，请重试', icon: 'none' }),
-          })
-        }
-        else {
-          uni.showToast({ title: '已保存到小程序文件，可在聊天里转发', icon: 'none' })
-        }
-        resolve()
+        shareZipFile(runtime, filePath, fileName).then(resolve)
       },
       fail: () => reject(new ApiError(500, '保存压缩包失败，请重试')),
     })

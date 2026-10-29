@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { onHide, onLaunch, onShow } from '@dcloudio/uni-app'
+import { captureParentUserId } from '@/utils/referral'
 
-onLaunch(() => {
-  // 应用启动
+onLaunch((options) => {
+  // 分享进入时先接住分享者 user_id，登录成功后作为 parent_user_id 上报
+  captureParentUserId(options?.query)
 })
 
 onShow(() => {

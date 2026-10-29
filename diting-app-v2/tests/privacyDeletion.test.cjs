@@ -42,6 +42,7 @@ function harness(memory, status, initialToken = 'user-token') {
       onShow(cb) { hooks.show = cb },
       onHide(cb) { hooks.hide = cb },
       onUnload(cb) { hooks.unload = cb },
+      onShareAppMessage() {},
     },
     '@/api/record': {
       eraseAll: async () => ({ deletionJobId: 7, status: 'RETRY_WAIT', pendingObjects: 2 }),
@@ -52,6 +53,7 @@ function harness(memory, status, initialToken = 'user-token') {
     '@/utils/deletionReceipt': receiptExports,
     '@/utils/errors': { messageOf: () => '网络错误' },
     '@/utils/h5Auth': { requireH5Login() { hooks.loginRedirected = true } },
+    '@/utils/share': { useShareContent: () => () => ({}) },
   }
   const exports = {}
   const uni = {

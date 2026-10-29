@@ -4,11 +4,16 @@
  * 数量由后台 `/configure/list` 决定，前端不写死。
  * 正文是 admin 后台富文本维护的 HTML，原样渲染。
  */
-import { onLoad } from '@dcloudio/uni-app'
+import { onLoad, onShareAppMessage } from '@dcloudio/uni-app'
 import { ref } from 'vue'
 import { fetchAgreementDetail } from '@/api/agreement'
 import type { AgreementDetail } from '@/api/agreement'
 import { messageOf } from '@/utils/errors'
+import { useShareContent } from '@/utils/share'
+
+// #ifdef MP-WEIXIN
+onShareAppMessage(useShareContent('/pages/home/index', '谛听 · 那段通话，有人替你再听一遍'))
+// #endif
 
 const detail = ref<AgreementDetail | null>(null)
 const errorText = ref('')

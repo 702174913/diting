@@ -1,13 +1,7 @@
-/**
- * 提交前的 5 道问询。
- *
- * 现阶段题目写在前端：后台的配置接口与返回格式还没定，先把样式和交互跑通。
- * 接入后台时只需要把 SURVEY_QUESTIONS 换成接口下发（同结构即可），
- * 采集结果也已经收敛成 toAnswerList() 的稳定结构，换传输方式不影响页面。
- */
 export interface SurveyOption {
-  key: 'A' | 'B'
+  key: string
   label: string
+  answerId?: number
 }
 
 export interface SurveyQuestion {
@@ -19,76 +13,131 @@ export interface SurveyQuestion {
 /** 一题的作答：题目 id + 选项 key */
 export interface SurveyAnswer {
   questionId: number
-  option: 'A' | 'B'
+  option: string
+  answerId?: number
 }
 
 /** 页面内的选择状态：题目 id -> 选项 key */
-export type SurveyPicks = Record<number, 'A' | 'B'>
+export type SurveyPicks = Record<number, string>
 
-export const SURVEY_QUESTIONS: SurveyQuestion[] = [
-  {
-    id: 1,
-    title: '你接到该催收电话的时间段是哪个？',
-    options: [
-      { key: 'A', label: '8:00 - 22:00' },
-      { key: 'B', label: '其他时间' },
-    ],
-  },
-  {
-    id: 2,
-    title: '你一天接收到催收电话的次数是多少？',
-    options: [
-      { key: 'A', label: '小于 3 次' },
-      { key: 'B', label: '其他' },
-    ],
-  },
-  {
-    id: 3,
-    title: '你是被催收本人吗？',
-    options: [
-      { key: 'A', label: '是' },
-      { key: 'B', label: '不是' },
-    ],
-  },
-  {
-    id: 4,
-    title: '你逾期是否超过 3 个月？',
-    options: [
-      { key: 'A', label: '是' },
-      { key: 'B', label: '不是' },
-    ],
-  },
-  {
-    id: 5,
-    title: '打你电话时是否使用的是私人手机号？',
-    options: [
-      { key: 'A', label: '是' },
-      { key: 'B', label: '不是' },
-    ],
-  },
-]
+/** 提交给上传接口的一题作答 */
+export interface QuestionParam {
+  question_id: number
+  question_answer_id: number
+}
+
+/** `GET /question/list` 的单条记录 */
+export interface QuestionRecord {
+  question_id?: number | string
+  title?: string
+  content?: string
+  enable?: number | string
+}
+
+/** `GET /question_answer/list` 的单条记录 */
+export interface AnswerRecord {
+  question_answer_id?: number | string
+  question_id?: number | string
+  title?: string
+  content?: string
+  enable?: number | string
+}
+
+function isEnabled(value: unknown): boolean {
+  return value === undefined || value === null || value === '' || Number(value) === 1
+}
+
+function toId(value: unknown): number | null {
+  const id = Number(value)
+  return Number.isSafeInteger(id) && id > 0 ? id : null
+}
+
+const OPTION_KEYS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+
+/** 把题目标题与选项清单按 question_id 合成弹层用的题目结构；禁用或无效的记录直接跳过 */
+export function buildSurveyQuestions(questions: QuestionRecord[], answers: AnswerRecord[]): SurveyQuestion[] {
+  const optionsByQuestion = new Map<number, SurveyOption[]>()
+
+  for (const answer of answers ?? []) {
+    const questionId = toId(answer?.question_id)
+    const label = typeof answer?.content === 'string' ? answer.content.trim() : ''
+    if (questionId === null || !isEnabled(answer?.enable) || !label) {
+      continue
+    }
+    const options = optionsByQuestion.get(questionId) ?? []
+    const key = typeof answer.title === 'string' && answer.title.trim()
+      ? answer.title.trim()
+      : OPTION_KEYS[options.length] ?? String(options.length + 1)
+    if (options.some(option => option.key === key)) {
+      continue
+    }
+    const answerId = toId(answer.question_answer_id)
+    options.push(answerId === null ? { key, label } : { key, label, answerId })
+    optionsByQuestion.set(questionId, options)
+  }
+
+  const result: SurveyQuestion[] = []
+  const seen = new Set<number>()
+
+  for (const question of questions ?? []) {
+    const id = toId(question?.question_id)
+    if (id === null || seen.has(id) || !isEnabled(question?.enable)) {
+      continue
+    }
+    const title = (typeof question.content === 'string' ? question.content : '').trim()
+      || (typeof question.title === 'string' ? question.title.trim() : '')
+    const options = optionsByQuestion.get(id)
+    if (!title || !options || options.length === 0) {
+      continue
+    }
+    seen.add(id)
+    result.push({ id, title, options })
+  }
+
+  return result
+}
 
 /** 已作答数量：用于「还差 N 题」与提交按钮可用性 */
-export function answeredCount(picks: SurveyPicks): number {
-  return SURVEY_QUESTIONS.filter(question => picks[question.id] !== undefined).length
+export function answeredCount(picks: SurveyPicks, questions: SurveyQuestion[]): number {
+  return questions.filter(question => picks[question.id] !== undefined).length
 }
 
-export function isComplete(picks: SurveyPicks): boolean {
-  return answeredCount(picks) === SURVEY_QUESTIONS.length
+export function isComplete(picks: SurveyPicks, questions: SurveyQuestion[]): boolean {
+  return questions.length > 0 && answeredCount(picks, questions) === questions.length
 }
 
-/**
- * 转成提交用的数组：按题目顺序、只带已作答项。
- * 后端格式未定，这里先给一个不带业务语义的结构（questionId + 选项 key），
- * 接入时在 http 层做一次映射即可，页面不用改。
- */
-export function toAnswerList(picks: SurveyPicks): SurveyAnswer[] {
+/** 转成提交用的数组：按题目顺序、只带已作答项 */
+export function toAnswerList(picks: SurveyPicks, questions: SurveyQuestion[]): SurveyAnswer[] {
   const answers: SurveyAnswer[] = []
-  for (const question of SURVEY_QUESTIONS) {
+  for (const question of questions) {
     const option = picks[question.id]
-    if (option) {
-      answers.push({ questionId: question.id, option })
+    if (!option) {
+      continue
     }
+    const hit = question.options.find(item => item.key === option)
+    answers.push(hit?.answerId === undefined
+      ? { questionId: question.id, option }
+      : { questionId: question.id, option, answerId: hit.answerId })
   }
   return answers
+}
+
+/** 转成上传接口需要的 questions 参数：只带能从题目接口取到 answer_id 的已作答项 */
+export function toQuestionParams(
+  picks: SurveyPicks,
+  questions: SurveyQuestion[],
+): QuestionParam[] {
+  const params: QuestionParam[] = []
+  for (const question of questions) {
+    const option = picks[question.id]
+    if (!option) {
+      continue
+    }
+    const hit = question.options.find(item => item.key === option)
+    if (hit?.answerId === undefined) {
+      continue
+    }
+    params.push({ question_id: question.id, question_answer_id: hit.answerId })
+  }
+  return params
 }

@@ -7,7 +7,7 @@
  * 本页只负责「交出去」：提交成功若拿到新记录 ID 就直接进 pages/report/detail 看进度，
  * 拿不到 ID 才回 pages/history/index；进度、结果与失败重传都由详情页讲，这里不再内联第二份进度。
  */
-import { onHide } from '@dcloudio/uni-app'
+import { onHide, onShareAppMessage } from '@dcloudio/uni-app'
 import { computed, onUnmounted, ref } from 'vue'
 import StatusBar from '@/components/StatusBar.vue'
 import UploadSelection from '@/components/UploadSelection.vue'
@@ -21,6 +21,7 @@ import {
   uploadRaw,
 } from '@/api/upload'
 import { ApiError } from '@/api/request'
+import { fetchSurveyQuestions } from '@/api/question'
 import { readAudioDurationMs } from '@/utils/audioDuration'
 import { messageOf } from '@/utils/errors'
 import { newIdempotencyKey } from '@/utils/idempotency'
@@ -32,10 +33,15 @@ import SurveySheet from '@/components/SurveySheet.vue'
 import { requireH5Login } from '@/utils/h5Auth'
 import { DEMO_MODE } from '@/utils/demo'
 import { hasFullAccess } from '@/utils/consentGate'
-import type { SurveyPicks } from '@/utils/survey'
-import { toAnswerList } from '@/utils/survey'
+import type { SurveyPicks, SurveyQuestion } from '@/utils/survey'
+import { toAnswerList, toQuestionParams } from '@/utils/survey'
+import { useShareContent } from '@/utils/share'
 
 const userStore = useUserStore()
+
+// #ifdef MP-WEIXIN
+onShareAppMessage(useShareContent('/pages/home/index', '谛听 · 那段通话，有人替你再听一遍'))
+// #endif
 
 const sheetVisible = ref(false)
 /**
@@ -84,19 +90,26 @@ async function putWithRefresh(sign: UploadSign, filePath: string, token: string)
 
 /**
  * 提交前的问卷：先问卷、再同意、最后才真正上传。
- * 顺序有意为之——问卷不依赖登录与后端，登录态没就绪时也能先把这一步走完。
+ * 题目来自 question/list 与 question_answer/list；加载失败时不打开问卷，无法继续下一步。
  */
 const surveyVisible = ref(false)
 const surveyAnswers = ref<SurveyPicks>({})
+const surveyQuestions = ref<SurveyQuestion[]>([])
 
-function openSurvey() {
+async function openSurvey() {
   if (pendingFiles.value.length === 0 || !ensureConsent()) {
     return
   }
-  surveyVisible.value = true
+  try {
+    surveyQuestions.value = await fetchSurveyQuestions()
+    surveyVisible.value = true
+  }
+  catch {
+    uni.showToast({ title: '题目加载失败，请稍后重试', icon: 'none' })
+  }
 }
 
-function pickAnswer(questionId: number, option: 'A' | 'B') {
+function pickAnswer(questionId: number, option: string) {
   surveyAnswers.value = { ...surveyAnswers.value, [questionId]: option }
 }
 
@@ -337,9 +350,9 @@ async function confirmUpload() {
   if (DEMO_MODE) {
     // 演示模式不提交：问卷答案只打到控制台，避免造出一条「看起来成功」的假任务
     sheetVisible.value = false
-    console.info('[demo] 问卷答案', toAnswerList(surveyAnswers.value))
+    console.info('[demo] 问卷答案', toAnswerList(surveyAnswers.value, surveyQuestions.value))
     uni.showToast({
-      title: `演示模式：已收集 ${toAnswerList(surveyAnswers.value).length}/5 题，未提交`,
+      title: `演示模式：已收集 ${toAnswerList(surveyAnswers.value, surveyQuestions.value).length}/${surveyQuestions.value.length} 题，未提交`,
       icon: 'none',
       duration: 2500,
     })
@@ -425,12 +438,19 @@ async function confirmUpload() {
     }
     uploadStage.value = '登记中…'
     currentAttempt.submitted = true
-    const id = await submitTask(uploadIds, currentAttempt.declaredDuration, token, currentAttempt.key)
+    const id = await submitTask(
+      uploadIds,
+      currentAttempt.declaredDuration,
+      token,
+      currentAttempt.key,
+      toQuestionParams(surveyAnswers.value, surveyQuestions.value),
+    )
     uploadStage.value = ''
     sheetVisible.value = false
     files.forEach(releaseChosenFile)
     pendingFiles.value = []
     attempt.value = null
+    surveyAnswers.value = {}
     // add 现在返回新记录 ID：直接进详情页看进度；拿不到 ID 才回记录列表，不猜测最新一条。
     // 小延迟是为了让 toast 在真机上先显示出来；跳转失败就留在本页，记录可在「记录」里找到。
     uni.showToast({ title: '上传成功', icon: 'success', duration: 1500 })
@@ -509,6 +529,7 @@ onUnmounted(() => {
     <SurveySheet
       :visible="surveyVisible"
       :answers="surveyAnswers"
+      :questions="surveyQuestions"
       @pick="pickAnswer"
       @submit="submitSurvey"
       @cancel="surveyVisible = false"

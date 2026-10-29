@@ -1,33 +1,34 @@
 <script setup lang="ts">
 /**
- * 提交前的 5 题问询弹层。
+ * 提交前的问询弹层。
  *
- * 为什么是「一屏 5 题」而不是分步：这 5 题都是二选一，总量很小，
- * 一屏看全能让用户知道「就问这些」，避免分步带来的「还有多少」焦虑；
+ * 题目由后台下发，通常一屏能看全，便于用户知道「就问这些」；
  * 安卓小屏也不怕，弹层内部自己滚。
  *
  * 只负责采集：答案通过 pick 事件回给页面，提交由页面决定（当前不发请求）。
  */
 import { computed } from 'vue'
-import type { SurveyPicks } from '@/utils/survey'
-import { SURVEY_QUESTIONS, answeredCount, isComplete } from '@/utils/survey'
+import type { SurveyPicks, SurveyQuestion } from '@/utils/survey'
+import { answeredCount, isComplete } from '@/utils/survey'
 
 const props = defineProps<{
   visible: boolean
   answers: SurveyPicks
+  questions: SurveyQuestion[]
 }>()
 
 const emit = defineEmits<{
-  pick: [questionId: number, option: 'A' | 'B']
+  pick: [questionId: number, option: string]
   submit: []
   cancel: []
 }>()
 
-const answered = computed(() => answeredCount(props.answers))
-const complete = computed(() => isComplete(props.answers))
-const missing = computed(() => SURVEY_QUESTIONS.length - answered.value)
+const questions = computed(() => props.questions)
+const answered = computed(() => answeredCount(props.answers, questions.value))
+const complete = computed(() => isComplete(props.answers, questions.value))
+const missing = computed(() => questions.value.length - answered.value)
 
-function choose(questionId: number, option: 'A' | 'B') {
+function choose(questionId: number, option: string) {
   emit('pick', questionId, option)
 }
 </script>
@@ -38,7 +39,7 @@ function choose(questionId: number, option: 'A' | 'B') {
       <view class="head">
         <view class="head-l">
           <text class="sheet-title">
-            提交前，问你 5 个问题
+            提交前，问你 {{ questions.length }} 个问题
           </text>
           <text class="sheet-sub">只用于本次判读口径，不会对外提供。</text>
         </view>
@@ -46,7 +47,7 @@ function choose(questionId: number, option: 'A' | 'B') {
       </view>
 
       <view class="qs">
-        <view v-for="(question, index) in SURVEY_QUESTIONS" :key="question.id" class="q">
+        <view v-for="(question, index) in questions" :key="question.id" class="q">
           <view class="q-head">
             <text class="q-no">{{ index + 1 }}</text>
             <text class="q-title">{{ question.title }}</text>
@@ -70,7 +71,7 @@ function choose(questionId: number, option: 'A' | 'B') {
 
       <view class="foot">
         <text class="foot-note">
-          {{ complete ? '5 题都选好了' : `还有 ${missing} 题没选` }}
+          {{ complete ? `${questions.length} 题都选好了` : `还有 ${missing} 题没选` }}
         </text>
         <button class="btn btn-main btn-block" :disabled="!complete" @click="emit('submit')">
           下一步：确认上传

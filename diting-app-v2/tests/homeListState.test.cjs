@@ -22,8 +22,14 @@ function harness(fetchTaskList) {
   }).outputText
   const dependencies = {
     vue,
-    '@dcloudio/uni-app': { onShow: (cb) => { onShow = cb } },
+    '@dcloudio/uni-app': {
+      onLoad: () => {},
+      onShow: (cb) => { onShow = cb },
+      onShareAppMessage: () => {},
+    },
     '@/stores/user': { useUserStore: () => store },
+    '@/utils/referral': { captureParentUserId: () => {} },
+    '@/utils/share': { useShareContent: () => () => ({}) },
     '@/api/record': { fetchTaskList },
     '@/utils/format': { greeting: () => '早安' },
     '@/utils/taskStatus': { isRunning: () => false },

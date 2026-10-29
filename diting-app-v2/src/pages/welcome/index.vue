@@ -6,10 +6,16 @@
  * 跳过与看完等价（都只是记「介绍过了」），不替用户同意任何事——
  * 上传前的 ConsentSheet 与协议页仍然是必经环节，这里不越位。
  */
+import { onShareAppMessage } from '@dcloudio/uni-app'
 import { computed, ref } from 'vue'
 import StatusBar from '@/components/StatusBar.vue'
 import GuideScreen from '@/components/GuideScreen.vue'
 import { markOnboarded } from '@/utils/onboard'
+import { useShareContent } from '@/utils/share'
+
+// #ifdef MP-WEIXIN
+onShareAppMessage(useShareContent('/pages/home/index', '谛听 · 那段通话，有人替你再听一遍'))
+// #endif
 
 const steps = [
   { no: '第一步', kind: 'upload' as const, title: '把那段对话交给我' },

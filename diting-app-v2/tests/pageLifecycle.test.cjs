@@ -23,11 +23,12 @@ function pageHarness(page, options = {}) {
   let requests = 0
   const dependencies = {
     'vue': { ...vue, onUnmounted: (cb) => { hooks.onUnmounted = cb } },
-    '@dcloudio/uni-app': Object.fromEntries(['onLoad', 'onShow', 'onHide', 'onUnload'].map(name => [name, (cb) => { hooks[name] = cb }])),
+    '@dcloudio/uni-app': Object.fromEntries(['onLoad', 'onShow', 'onHide', 'onUnload', 'onShareAppMessage'].map(name => [name, (cb) => { hooks[name] = cb }])),
     '@/stores/user': { useUserStore: () => store },
     '@/utils/h5Auth': { requireH5Login: () => true },
     // 冷启动授权门禁：本文件测的是上传/记录流程，按「已同意」处理
     '@/utils/consentGate': { hasFullAccess: () => true },
+    '@/utils/share': { useShareContent: () => () => ({}) },
     '@/utils/demo': { DEMO_MODE: false },
     '@/api/record': {
       fetchTaskStatus: async () => {
@@ -38,6 +39,7 @@ function pageHarness(page, options = {}) {
     },
     '@/api/request': { ApiError },
     '@/api/upload': options.uploadApi || {},
+    '@/api/question': { fetchSurveyQuestions: async () => [] },
     '@/utils/audioDuration': { readAudioDurationMs: options.readAudioDurationMs || (async () => 60_000) },
     '@/utils/errors': { messageOf: () => '加载失败，请重试' },
     '@/utils/idempotency': { newIdempotencyKey: () => `upload-${Math.random()}` },
@@ -83,7 +85,7 @@ function pageHarness(page, options = {}) {
   function load(name) {
     if (dependencies[name])
       return dependencies[name]
-    if (['@/utils/taskStatus', '@/utils/polling', '@/utils/reportPresentation'].includes(name)) {
+    if (['@/utils/taskStatus', '@/utils/polling', '@/utils/reportPresentation', '@/utils/survey'].includes(name)) {
       return evaluate(fs.readFileSync(path.join(__dirname, '../src', `${name.slice(2)}.ts`), 'utf8'), name)
     }
     return {}
@@ -256,7 +258,7 @@ test('选中超长录音立即拦截，保留之前的文件且不上传 OSS', a
   assert.match(h.toasts.at(-1).title, /超过 600 秒/)
 })
 
-test('恰好达到上限可上传，提交任务时带上本地读取的声明时长', async () => {
+test('恰好达到上限可上传，提交任务时带上声明时长与问卷作答', async () => {
   const submissions = []
   const h = pageHarness('upload', {
     uploadApi: {
@@ -264,15 +266,24 @@ test('恰好达到上限可上传，提交任务时带上本地读取的声明�
       signUpload: async () => ({ uploadId: 1 }),
       uploadRaw: async () => {},
       completeUpload: async () => ({ durationMs: null }),
-      submitTask: async (_ids, duration) => {
-        submissions.push(duration)
+      submitTask: async (_ids, duration, _token, _key, questions) => {
+        submissions.push({ duration, questions: JSON.stringify(questions) })
         return 88
       },
     },
   })
   h.state.pendingFiles.value = [{ name: 'call.mp3', path: 'blob:call', size: 100, durationMs: 600_000 }]
+  h.state.surveyQuestions.value = [
+    { id: 1, title: '第一题', options: [{ key: 'A', label: '是', answerId: 1 }] },
+    { id: 5, title: '第五题', options: [{ key: 'C', label: '不确定', answerId: 11 }] },
+  ]
+  h.state.surveyAnswers.value = { 1: 'A', 5: 'C' }
   await h.state.confirmUpload()
-  assert.deepEqual(submissions, [600])
+  assert.deepEqual(submissions, [{
+    duration: 600,
+    questions: '[{"question_id":1,"question_answer_id":1},{"question_id":5,"question_answer_id":11}]',
+  }])
+  assert.deepEqual({ ...h.state.surveyAnswers.value }, {})
 })
 
 test('配置改变后正式签发前再次拦截超长录音，不发签名也不上传 OSS', async () => {

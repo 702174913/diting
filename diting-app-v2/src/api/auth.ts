@@ -1,15 +1,21 @@
 /**
- * 认证接口：听悟后端只有 /user/login（不存在则自动注册）与 /user/get。
- * 微信登录/绑定、独立注册、协议版本快照在本后端不存在，这里明确降级并给出提示，
- * 不伪造成功。账号密码走 form-urlencoded，返回体是 JWT 字符串。
+ * 认证接口：听悟后端 /user/login（不存在则自动注册，已扩展支持微信 code）与 /user/get。
+ * 账号密码与微信 code 均走 form-urlencoded，返回体是 JWT 字符串。
  */
 import { ApiError, request } from './request'
 import { getUser } from './tingwu'
 import type { LoginResult, UserInfo } from '@/types/api'
 import { decodeJwtUserId } from '@/utils/jwt'
+import { clearParentUserId, getParentUserId } from '@/utils/referral'
 
 function toUserInfo(id: number, username: string, hasPassword: boolean): UserInfo {
   return { id, username, nickname: username, hasPassword, hasWechat: false }
+}
+
+/** 分享进入的归因只在本次登录成功时提交一次，失败时保留以便重试 */
+function loginData(data: Record<string, unknown>): Record<string, unknown> {
+  const parentUserId = getParentUserId()
+  return parentUserId ? { ...data, parent_user_id: parentUserId } : data
 }
 
 export async function loginByPassword(username: string, password: string): Promise<LoginResult> {
@@ -18,8 +24,9 @@ export async function loginByPassword(username: string, password: string): Promi
     method: 'POST',
     form: true,
     token: '',
-    data: { username, password },
+    data: loginData({ username, password }),
   })
+  clearParentUserId()
   const id = decodeJwtUserId(token) ?? 0
   return { token, userInfo: toUserInfo(id, username, true), isNewUser: false }
 }
@@ -34,13 +41,32 @@ export function registerAccount(
   return loginByPassword(username, password)
 }
 
-/** 本后端不支持：保留原参数签名供 UI 调用，调用方据此提示改用账号密码 */
-export function loginByWechat(
-  _code?: string,
+/**
+ * 微信 code 登录：与账号密码共用 `/user/login`，后端按 code 换 openid 后下发 JWT。
+ * agreed/seenVersions 保留参数签名，供调用方沿用登录页的协议快照。
+ */
+export async function loginByWechat(
+  code?: string,
   _agreed?: boolean,
   _seenVersions?: Record<string, number>,
 ): Promise<LoginResult> {
-  return Promise.reject(new ApiError(501, '当前服务暂不支持微信登录，请使用账号密码登录'))
+  if (!code) {
+    throw new ApiError(400, '未取得微信授权码')
+  }
+  const token = await request<string>({
+    url: '/user/login',
+    method: 'POST',
+    form: true,
+    token: '',
+    data: loginData({ code }),
+  })
+  clearParentUserId()
+  const id = decodeJwtUserId(token) ?? 0
+  return {
+    token,
+    userInfo: { id, username: '', nickname: '', hasPassword: false, hasWechat: true },
+    isNewUser: false,
+  }
 }
 
 export function bindWechat(_code?: string, _token?: string): Promise<UserInfo> {

@@ -3,7 +3,7 @@
  * Tab 1「今天」——面向焦虑中的新用户的首屏。
  * 目标：先把人留下来，再谈功能。情绪安抚在前，行动号召在后。
  */
-import { onShow } from '@dcloudio/uni-app'
+import { onLoad, onShareAppMessage, onShow } from '@dcloudio/uni-app'
 import { computed, ref } from 'vue'
 import StatusBar from '@/components/StatusBar.vue'
 import HeroCard from '@/components/HeroCard.vue'
@@ -15,6 +15,8 @@ import type { TaskItem } from '@/types/api'
 import { requireH5Login } from '@/utils/h5Auth'
 import { hasOnboarded } from '@/utils/onboard'
 import { hasFullAccess } from '@/utils/consentGate'
+import { captureParentUserId } from '@/utils/referral'
+import { useShareContent } from '@/utils/share'
 import markWarm from '@/static/icons/mark-warm.png'
 
 const userStore = useUserStore()
@@ -26,6 +28,11 @@ let requestEpoch = 0
 const hello = greeting()
 /** 冷启动没同意条款时，首页保留浏览，但顶部提示「功能受限」 */
 const restricted = ref(!hasFullAccess())
+
+onLoad(query => captureParentUserId(query))
+// #ifdef MP-WEIXIN
+onShareAppMessage(useShareContent('/pages/home/index', '谛听 · 那段通话，有人替你再听一遍'))
+// #endif
 
 function openConsent() {
   uni.navigateTo({ url: '/pages/consent/index' })

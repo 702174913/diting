@@ -110,12 +110,19 @@ export function completeUpload(uploadId: number, _token: string): Promise<Upload
   })
 }
 
+/** 提交的问卷作答：题目 id 与选项 id */
+export interface QuestionSubmission {
+  question_id: number
+  question_answer_id: number
+}
+
 /** 同次提交允许最多一段 MP3 与最多六张图片（可混合）；返回后端给出的新记录 ID（拿不到时为 null）。 */
 export async function submitTask(
   uploadIds: number[],
   declaredDurationSec: number | undefined,
   token: string,
   _idempotencyKey?: string,
+  questions: QuestionSubmission[] = [],
 ): Promise<number | null> {
   if (uploadIds.length === 0) {
     throw new ApiError(400, '没有可提交的文件，请重新上传')
@@ -141,6 +148,7 @@ export async function submitTask(
     audio: audio[0]?.fileName ?? '',
     audio_duration: audio.length && Number.isFinite(declaredDurationSec)
       ? Math.max(0, Math.ceil(declaredDurationSec!)) : 0,
+    questions: JSON.stringify(questions),
   }, token)
   uploadIds.forEach((uploadId) => {
     uploads.delete(uploadId)

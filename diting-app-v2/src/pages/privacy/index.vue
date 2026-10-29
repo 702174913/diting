@@ -3,7 +3,7 @@
  * 隐私与数据：把「可以随时撤回」这句话落成一个真的按钮。
  * 抹除先撤销账号访问，清理作业要等旧签名失效后复扫，不能提前宣称彻底完成。
  */
-import { onHide, onShow, onUnload } from '@dcloudio/uni-app'
+import { onHide, onShareAppMessage, onShow, onUnload } from '@dcloudio/uni-app'
 import { ref } from 'vue'
 import { eraseAll as eraseAllRequest, fetchDeletion } from '@/api/record'
 import { ApiError, isTokenExpiredCode } from '@/api/request'
@@ -13,8 +13,13 @@ import { clearDeletionReceipt, getDeletionReceipt, saveDeletionReceipt } from '@
 import { useUserStore } from '@/stores/user'
 import { messageOf } from '@/utils/errors'
 import { requireH5Login } from '@/utils/h5Auth'
+import { useShareContent } from '@/utils/share'
 
 const userStore = useUserStore()
+
+// #ifdef MP-WEIXIN
+onShareAppMessage(useShareContent('/pages/home/index', '谛听 · 那段通话，有人替你再听一遍'))
+// #endif
 const deleting = ref(false)
 const cleanStatus = ref('')
 const statusError = ref('')

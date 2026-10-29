@@ -31,6 +31,13 @@ function freshGate() {
 function pageHarness(rel, options = {}) {
   const nav = []
   const hooks = {}
+  const store = options.store ?? {
+    token: '',
+    userInfo: null,
+    consentRequired: false,
+    setLogin(value) { this.token = value },
+    ensureLogin: async () => true,
+  }
   const uni = {
     navigateTo: o => nav.push(o.url),
     switchTab: o => nav.push(o.url),
@@ -38,6 +45,7 @@ function pageHarness(rel, options = {}) {
     navigateBack: () => nav.push('back'),
     showToast() {},
     getSystemInfoSync: () => ({ statusBarHeight: 20, windowHeight: 844 }),
+    login: ({ success }) => success({ code: 'wx-code' }),
     ...options.uni,
   }
   const filename = path.join(SRC, rel)
@@ -56,7 +64,7 @@ function pageHarness(rel, options = {}) {
   const deps = {
     'vue': { ...vue, onUnmounted() {}, onMounted() {} },
     '@dcloudio/uni-app': Object.fromEntries(
-      ['onLoad', 'onShow', 'onHide', 'onUnload'].map(name => [name, (cb) => { hooks[name] = cb }]),
+      ['onLoad', 'onShow', 'onHide', 'onUnload', 'onShareAppMessage'].map(name => [name, (cb) => { hooks[name] = cb }]),
     ),
     '@/components/StatusBar.vue': {},
     '@/components/HeroCard.vue': {},
@@ -65,11 +73,28 @@ function pageHarness(rel, options = {}) {
     '@/components/SurveySheet.vue': {},
     '@/components/ConsentSheet.vue': {},
     '@/utils/format': { greeting: () => '今天也在' },
-    '@/stores/user': { useUserStore: () => options.store ?? { token: '', userInfo: null, consentRequired: false, ensureLogin: async () => true } },
+    '@/stores/user': { useUserStore: () => store },
+    '@/api/auth': {
+      loginByWechat: async () => ({
+        token: 'wx-token',
+        userInfo: { id: 1, username: 'wx', nickname: 'wx', hasPassword: false, hasWechat: true },
+        isNewUser: false,
+      }),
+    },
+    '@/utils/errors': { messageOf: error => error?.message ?? '操作失败' },
+    '@/utils/referral': { captureParentUserId() {} },
+    '@/utils/share': { useShareContent: () => () => ({}) },
     '@/utils/h5Auth': { requireH5Login: () => true },
     // 首页的首次引导与本文件无关：按「已看过」处理，避免抢在门禁断言之前跳页
     '@/utils/onboard': { hasOnboarded: () => true },
     '@/api/record': { fetchTaskList: async () => ({ items: [], total: 0 }) },
+    '@/api/question': {
+      fetchSurveyQuestions: async () => [{
+        id: 1,
+        title: '题目',
+        options: [{ key: 'A', label: '是', answerId: 1 }],
+      }],
+    },
     '@/api/agreement': {
       fetchAgreements: async () => options.agreements ?? [
         { key: '软件许可及服务协议', title: '软件许可及服务协议', version: 1 },
@@ -124,7 +149,7 @@ test('授权页列出协议清单，同意与不同意都放行离开', async ()
   assert.match(first.template, /不同意，先看看/)
 
   // 冷启动（没有上一页）→ 回首页
-  first.state.agree()
+  await first.state.agree()
   assert.deepEqual(first.nav, ['/pages/home/index'])
 
   // 被功能入口拦回来（栈内有页）→ 回原页
@@ -132,6 +157,92 @@ test('授权页列出协议清单，同意与不同意都放行离开', async ()
   await second.hooks.onLoad({})
   second.state.decline()
   assert.deepEqual(second.nav, ['back'])
+})
+
+test('同意时登录：未登录传 code 走登录接口，已登录直接跳过', async () => {
+  const calls = []
+  const store = {
+    token: '',
+    userInfo: null,
+    consentRequired: false,
+    setLogin(value) { this.token = value },
+    ensureLogin: async () => true,
+  }
+  const first = pageHarness('pages/consent/index.vue', {
+    store,
+    deps: {
+      '@/api/auth': {
+        loginByWechat: async (code, agreed, seenVersions) => {
+          calls.push({ code, agreed, seenVersions })
+          return {
+            token: 'wx-token',
+            userInfo: { id: 1, username: 'wx', nickname: 'wx', hasPassword: false, hasWechat: true },
+            isNewUser: false,
+          }
+        },
+      },
+    },
+  })
+  await first.hooks.onLoad({})
+  await first.state.agree()
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].code, 'wx-code')
+  assert.equal(calls[0].agreed, true)
+  assert.deepEqual({ ...calls[0].seenVersions }, {
+    软件许可及服务协议: 1,
+    隐私保护指引: 1,
+    个人信息收集与授权书: 1,
+    通话录音与语音识别授权协议: 1,
+    '第三方共享与 SDK 清单': 1,
+  })
+  assert.equal(store.token, 'wx-token')
+  assert.deepEqual(first.nav, ['/pages/home/index'])
+
+  // 已有登录态：不再获取 code、不再调用登录接口
+  let loginCalled = false
+  const signedIn = pageHarness('pages/consent/index.vue', {
+    store: { ...store, token: 'existing' },
+    deps: {
+      '@/api/auth': {
+        loginByWechat: async () => {
+          loginCalled = true
+          throw new Error('不该调用')
+        },
+      },
+    },
+    uni: {
+      login: () => {
+        loginCalled = true
+      },
+    },
+  })
+  await signedIn.hooks.onLoad({})
+  await signedIn.state.agree()
+  assert.equal(loginCalled, false)
+  assert.deepEqual(signedIn.nav, ['/pages/home/index'])
+})
+
+test('登录失败留在授权页并提示，不放行', async () => {
+  const store = {
+    token: '',
+    userInfo: null,
+    consentRequired: false,
+    setLogin(value) { this.token = value },
+    ensureLogin: async () => true,
+  }
+  const failed = pageHarness('pages/consent/index.vue', {
+    store,
+    deps: {
+      '@/api/auth': { loginByWechat: async () => { throw new Error('微信登录失败') } },
+      '@/utils/errors': { messageOf: error => error.message },
+    },
+  })
+  await failed.hooks.onLoad({})
+  await failed.state.agree()
+  assert.deepEqual(failed.nav, [])
+  assert.equal(store.token, '')
+  assert.equal(failed.state.errorText.value, '微信登录失败')
+  assert.match(failed.template, /gate-error/)
 })
 
 test('协议来自接口，数量不写死', async () => {
@@ -146,7 +257,7 @@ test('协议来自接口，数量不写死', async () => {
   // 取不到就明确说取不到，并把「同意」按钮禁用——不能让人同意一份没看过的条款
   assert.equal(broken.state.agreements.value.length, 0)
   assert.match(broken.template, /协议暂时取不到/)
-  assert.match(broken.template, /:disabled="loading \|\| agreements\.length === 0"/)
+  assert.match(broken.template, /:disabled="loading \|\| agreements\.length === 0 \|\| busy"/)
 })
 
 test('授权页是冷启动第一屏', () => {
@@ -194,7 +305,7 @@ test('同意之后上传不再被门禁拦', async () => {
     },
   })
   upload.state.pendingFiles.value = [{ name: 'a.mp3', path: 'p1', size: 1024 }]
-  upload.state.openSurvey()
+  await upload.state.openSurvey()
   assert.equal(upload.state.surveyVisible.value, true)
   assert.deepEqual(upload.nav, [])
 })

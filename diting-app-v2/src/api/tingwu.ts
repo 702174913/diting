@@ -28,6 +28,27 @@ export interface AudioTranslationRaw {
   audio: string | null
   audio_duration: number | null
   createtime: string | null
+  /** 新接口字段：与上面的 task_ 前缀字段一一对应，进入业务层前统一归一化 */
+  audio_task_id?: string | null
+  audio_task_status?: string | null
+  audio_task_result?: string | null
+  audio_translation_result?: string | null
+  audio_handle_result?: string | null
+  audio_match_result?: string | null
+  questions?: string | null
+}
+
+/** 接口把 task_* 等字段改名为 audio_*；这里统一回落，列表与详情共用同一套业务字段 */
+function normalizeTask(raw: AudioTranslationRaw): AudioTranslationRaw {
+  return {
+    ...raw,
+    task_id: raw.audio_task_id ?? raw.task_id ?? null,
+    task_status: raw.audio_task_status ?? raw.task_status ?? null,
+    task_result: raw.audio_task_result ?? raw.task_result ?? null,
+    translation_result: raw.audio_translation_result ?? raw.translation_result ?? null,
+    handle_result: raw.audio_handle_result ?? raw.handle_result ?? null,
+    match_result: raw.audio_match_result ?? raw.match_result ?? null,
+  }
 }
 
 export interface UserRaw {
@@ -45,15 +66,16 @@ export async function listAudioTranslations(page: number, token: string): Promis
     data: { page },
     token,
   })
-  return Array.isArray(items) ? items : []
+  return Array.isArray(items) ? items.map(normalizeTask) : []
 }
 
-export function getAudioTranslation(id: number, token: string): Promise<AudioTranslationRaw | null> {
-  return request({
+export async function getAudioTranslation(id: number, token: string): Promise<AudioTranslationRaw | null> {
+  const task = await request<AudioTranslationRaw | null>({
     url: '/audio_translation/get',
     data: { audio_translation_id: id },
     token,
   })
+  return task ? normalizeTask(task) : null
 }
 
 /** add 现在会返回新记录 ID；兼容数字、数字字符串与对象三种返回形态。 */
@@ -78,7 +100,7 @@ function extractTranslationId(data: unknown): number | null {
 }
 
 export async function addAudioTranslation(
-  params: { picture_names: string, pictures: string, audio_name: string, audio: string, audio_duration: number },
+  params: { picture_names: string, pictures: string, audio_name: string, audio: string, audio_duration: number, questions: string },
   token: string,
 ): Promise<number | null> {
   const data = await request<unknown>({ url: '/audio_translation/add', method: 'POST', form: true, data: params, token })

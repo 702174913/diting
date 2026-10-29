@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { onLoad } from '@dcloudio/uni-app'
+import { onLoad, onShareAppMessage } from '@dcloudio/uni-app'
 import { ref } from 'vue'
 import AccountLoginSheet from '@/components/AccountLoginSheet.vue'
 import StatusBar from '@/components/StatusBar.vue'
 import type { ReturnTab } from '@/utils/h5Auth'
+import { useShareContent } from '@/utils/share'
 
 const tabs: Record<ReturnTab, string> = {
   home: '/pages/home/index',
@@ -13,6 +14,10 @@ const tabs: Record<ReturnTab, string> = {
 }
 const returnTab = ref<ReturnTab>('home')
 const resumePath = ref('')
+
+// #ifdef MP-WEIXIN
+onShareAppMessage(useShareContent('/pages/home/index', '谛听 · 那段通话，有人替你再听一遍'))
+// #endif
 
 onLoad((query) => {
   const requested = query?.returnTab

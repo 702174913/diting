@@ -42,6 +42,42 @@ function u32(value: number): Uint8Array {
   return bytes
 }
 
+/**
+ * 小程序运行环境没有 TextEncoder（真机直接 ReferenceError），这里手写 UTF-8 编码。
+ * 支持代理对，保证 emoji 等扩展字符也能写进文件名。
+ */
+function utf8Encode(text: string): Uint8Array {
+  const bytes: number[] = []
+  for (let i = 0; i < text.length; i++) {
+    let code = text.charCodeAt(i)
+    if (code >= 0xD800 && code <= 0xDBFF && i + 1 < text.length) {
+      const next = text.charCodeAt(i + 1)
+      if (next >= 0xDC00 && next <= 0xDFFF) {
+        code = 0x10000 + ((code - 0xD800) << 10) + (next - 0xDC00)
+        i++
+      }
+    }
+    if (code < 0x80) {
+      bytes.push(code)
+    }
+    else if (code < 0x800) {
+      bytes.push(0xC0 | (code >> 6), 0x80 | (code & 0x3F))
+    }
+    else if (code < 0x10000) {
+      bytes.push(0xE0 | (code >> 12), 0x80 | ((code >> 6) & 0x3F), 0x80 | (code & 0x3F))
+    }
+    else {
+      bytes.push(
+        0xF0 | (code >> 18),
+        0x80 | ((code >> 12) & 0x3F),
+        0x80 | ((code >> 6) & 0x3F),
+        0x80 | (code & 0x3F),
+      )
+    }
+  }
+  return new Uint8Array(bytes)
+}
+
 function concat(parts: Uint8Array[]): Uint8Array {
   const total = parts.reduce((sum, part) => sum + part.length, 0)
   const merged = new Uint8Array(total)
@@ -58,7 +94,6 @@ function concat(parts: Uint8Array[]): Uint8Array {
  * 文件名按 UTF-8 写入并置 general purpose bit 11，保证小程序端中文名可解压。
  */
 export function createZip(entries: ZipEntry[]): Uint8Array {
-  const encoder = new TextEncoder()
   const files: Uint8Array[] = []
   const central: Uint8Array[] = []
   const now = new Date()
@@ -67,7 +102,7 @@ export function createZip(entries: ZipEntry[]): Uint8Array {
   let offset = 0
   let count = 0
   for (const entry of entries) {
-    const name = encoder.encode(entry.name)
+    const name = utf8Encode(entry.name)
     const data = entry.data
     const crc = crc32(data)
     const local = concat([

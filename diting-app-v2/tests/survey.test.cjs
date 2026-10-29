@@ -9,6 +9,14 @@ const { parse, compileScript, compileTemplate } = require('@vue/compiler-sfc')
 
 const SRC = path.join(__dirname, '../src')
 
+const QUESTIONS = [
+  { id: 1, title: '第一题', options: [{ key: 'A', label: '是', answerId: 1 }, { key: 'B', label: '不是', answerId: 2 }] },
+  { id: 2, title: '第二题', options: [{ key: 'A', label: '是', answerId: 3 }, { key: 'B', label: '不是', answerId: 4 }] },
+  { id: 3, title: '第三题', options: [{ key: 'A', label: '是', answerId: 5 }, { key: 'B', label: '不是', answerId: 6 }] },
+  { id: 4, title: '第四题', options: [{ key: 'A', label: '是', answerId: 7 }, { key: 'B', label: '不是', answerId: 8 }] },
+  { id: 5, title: '第五题', options: [{ key: 'A', label: '是', answerId: 9 }, { key: 'B', label: '不是', answerId: 10 }] },
+]
+
 function transpile(source, filename) {
   return ts.transpileModule(source, { compilerOptions: {
     module: ts.ModuleKind.CommonJS,
@@ -37,7 +45,7 @@ function uploadHarness(options = {}) {
   const survey = loadUtil('utils/survey.ts')
   const deps = {
     'vue': { ...vue, onUnmounted: () => {} },
-    '@dcloudio/uni-app': { onHide: () => {}, onLoad: () => {}, onShow: () => {} },
+    '@dcloudio/uni-app': { onHide: () => {}, onLoad: () => {}, onShow: () => {}, onShareAppMessage: () => {} },
     '@/components/StatusBar.vue': {},
     '@/components/UploadSelection.vue': {},
     '@/components/SurveySheet.vue': {},
@@ -57,7 +65,9 @@ function uploadHarness(options = {}) {
     '@/utils/h5Auth': { requireH5Login: () => true },
     '@/utils/demo': { DEMO_MODE: false },
     '@/utils/consentGate': { hasFullAccess: () => true },
+    '@/utils/share': { useShareContent: () => () => ({}) },
     '@/utils/survey': survey,
+    '@/api/question': { fetchSurveyQuestions: async () => QUESTIONS },
     ...options.deps,
   }
   const filename = path.join(SRC, 'pages/upload/index.vue')
@@ -83,42 +93,74 @@ function uploadHarness(options = {}) {
   return { state, template: descriptor.template.content, source, nav, survey }
 }
 
-test('问卷就是后台给的 5 道题，每题 A/B 两个选项', () => {
+test('题目接口没有数据时不生成任何题目', () => {
   const survey = loadUtil('utils/survey.ts')
-  assert.equal(survey.SURVEY_QUESTIONS.length, 5)
-  assert.deepEqual(Array.from(survey.SURVEY_QUESTIONS, q => q.id), [1, 2, 3, 4, 5])
-  for (const question of survey.SURVEY_QUESTIONS) {
-    assert.equal(question.options.length, 2, question.title)
-    assert.deepEqual(Array.from(question.options, o => o.key), ['A', 'B'], question.title)
-    assert.ok(question.title.length > 0)
-  }
-  // 题干与选项要和产品给的原文一致（漏字会直接变成对外口径错误）
-  assert.equal(survey.SURVEY_QUESTIONS[0].title, '你接到该催收电话的时间段是哪个？')
-  assert.equal(survey.SURVEY_QUESTIONS[0].options[0].label, '8:00 - 22:00')
-  assert.equal(survey.SURVEY_QUESTIONS[1].options[0].label, '小于 3 次')
-  assert.equal(survey.SURVEY_QUESTIONS[2].title, '你是被催收本人吗？')
-  assert.equal(survey.SURVEY_QUESTIONS[3].title, '你逾期是否超过 3 个月？')
-  assert.equal(survey.SURVEY_QUESTIONS[4].title, '打你电话时是否使用的是私人手机号？')
+  assert.deepEqual(Array.from(survey.buildSurveyQuestions([], [])), [])
+  assert.equal(survey.isComplete({}, []), false)
+  assert.deepEqual(Array.from(survey.toAnswerList({}, [])), [])
+  assert.deepEqual(Array.from(survey.toQuestionParams({}, [])), [])
+})
+
+test('题目接口按 question_id 合并选项，禁用项不展示', () => {
+  const survey = loadUtil('utils/survey.ts')
+  const questions = [
+    { question_id: 1, title: '问题', content: '接到该催收电话的时间段是?', enable: 1 },
+    { question_id: 2, title: '问题', content: '禁用题', enable: 0 },
+    { question_id: 3, title: '问题', content: '您是债务人本人吗?', enable: 1 },
+    { question_id: 4, title: '问题', content: '没有选项的题', enable: 1 },
+  ]
+  const answers = [
+    { question_answer_id: 1, question_id: 1, title: 'A', content: '8:00-22:00', enable: 1 },
+    { question_answer_id: 2, question_id: 1, title: 'B', content: '其他时间', enable: 1 },
+    { question_answer_id: 3, question_id: 2, title: 'A', content: '禁用选项', enable: 1 },
+    { question_answer_id: 4, question_id: 3, title: 'A', content: '是', enable: 1 },
+    { question_answer_id: 5, question_id: 3, title: 'B', content: '不是', enable: 0 },
+    { question_answer_id: 6, question_id: 3, title: 'C', content: '不确定', enable: 1 },
+  ]
+  const list = survey.buildSurveyQuestions(questions, answers)
+  assert.deepEqual(Array.from(list, q => q.id), [1, 3])
+  assert.equal(list[0].title, '接到该催收电话的时间段是?')
+  assert.deepEqual(Array.from(list[0].options, o => `${o.key}${o.label}`), ['A8:00-22:00', 'B其他时间'])
+  assert.deepEqual(Array.from(list[1].options, o => `${o.key}${o.label}${o.answerId}`), ['A是4', 'C不确定6'])
+  assert.deepEqual(Array.from(survey.buildSurveyQuestions([], [])), [])
+})
+
+test('作答转成上传参数：只带 question_id 与 question_answer_id', () => {
+  const survey = loadUtil('utils/survey.ts')
+  const questions = survey.buildSurveyQuestions([
+    { question_id: 1, content: '第一题', enable: 1 },
+    { question_id: 2, content: '第二题', enable: 1 },
+  ], [
+    { question_answer_id: 7, question_id: 1, title: 'A', content: '是', enable: 1 },
+    { question_answer_id: 8, question_id: 1, title: 'B', content: '不是', enable: 1 },
+    { question_answer_id: 9, question_id: 2, title: 'A', content: '是', enable: 1 },
+  ])
+  assert.equal(
+    JSON.stringify(survey.toQuestionParams({ 1: 'B', 2: 'A' }, questions)),
+    '[{"question_id":1,"question_answer_id":8},{"question_id":2,"question_answer_id":9}]',
+  )
+  assert.equal(JSON.stringify(survey.toQuestionParams({}, questions)), '[]')
+  assert.equal(JSON.stringify(survey.toQuestionParams({ 1: 'A' }, questions)), '[{"question_id":1,"question_answer_id":7}]')
 })
 
 test('答案按题目顺序收敛成数组，未作答的不伪造', () => {
   const survey = loadUtil('utils/survey.ts')
-  assert.equal(survey.answeredCount({}), 0)
-  assert.equal(survey.isComplete({}), false)
-  assert.deepEqual(Array.from(survey.toAnswerList({})), [])
+  assert.equal(survey.answeredCount({}, QUESTIONS), 0)
+  assert.equal(survey.isComplete({}, QUESTIONS), false)
+  assert.deepEqual(Array.from(survey.toAnswerList({}, QUESTIONS)), [])
 
   const partial = { 3: 'A', 1: 'B' }
-  assert.equal(survey.answeredCount(partial), 2)
-  assert.equal(survey.isComplete(partial), false)
+  assert.equal(survey.answeredCount(partial, QUESTIONS), 2)
+  assert.equal(survey.isComplete(partial, QUESTIONS), false)
   // 顺序以题目为准，不跟随用户点击顺序
   assert.deepEqual(
-    Array.from(survey.toAnswerList(partial), a => `${a.questionId}${a.option}`),
+    Array.from(survey.toAnswerList(partial, QUESTIONS), a => `${a.questionId}${a.option}`),
     ['1B', '3A'],
   )
 
   const all = { 1: 'A', 2: 'B', 3: 'A', 4: 'B', 5: 'A' }
-  assert.equal(survey.isComplete(all), true)
-  assert.deepEqual(Array.from(survey.toAnswerList(all), a => a.option), ['A', 'B', 'A', 'B', 'A'])
+  assert.equal(survey.isComplete(all, QUESTIONS), true)
+  assert.deepEqual(Array.from(survey.toAnswerList(all, QUESTIONS), a => a.option), ['A', 'B', 'A', 'B', 'A'])
 })
 
 test('问卷弹层：5 题全在，未答完不能提交，取消/提交各自冒泡', () => {
@@ -143,7 +185,7 @@ test('问卷弹层：5 题全在，未答完不能提交，取消/提交各自�
     require: name => (name === 'vue' ? vue : name === '@/utils/survey' ? survey : {}),
   }, { filename })
   const component = exports.default
-  const props = { visible: true, answers: {} }
+  const props = { visible: true, answers: {}, questions: QUESTIONS }
   const state = component.setup(props, { expose() {}, emit: (name, ...args) => events.push([name, ...args]) })
   assert.equal(state.complete.value, false)
   assert.equal(state.missing.value, 5)
@@ -151,23 +193,24 @@ test('问卷弹层：5 题全在，未答完不能提交，取消/提交各自�
   assert.deepEqual(events[0], ['pick', 2, 'B'])
 
   // 选项高亮与提交可用性都由 answers 驱动，不能在组件里另存一份
-  const filled = component.setup({ visible: true, answers: { 1: 'A', 2: 'B', 3: 'A', 4: 'B', 5: 'A' } }, { expose() {}, emit() {} })
+  const filled = component.setup({ visible: true, answers: { 1: 'A', 2: 'B', 3: 'A', 4: 'B', 5: 'A' }, questions: QUESTIONS }, { expose() {}, emit() {} })
   assert.equal(filled.complete.value, true)
   assert.equal(filled.missing.value, 0)
   assert.match(template.code, /answers\[question\.id\] === option\.key/)
 })
 
-test('上传页：先问卷、再同意，取消同意不丢答案', () => {
+test('上传页：先问卷、再同意，取消同意不丢答案', async () => {
   const h = uploadHarness()
   assert.equal(h.state.surveyVisible.value, false)
 
   // 没选文件不该弹问卷（避免空手进问卷再被退回）
-  h.state.openSurvey()
+  await h.state.openSurvey()
   assert.equal(h.state.surveyVisible.value, false)
 
   h.state.pendingFiles.value = [{ name: 'a.mp3', path: 'p1', size: 1024 }]
-  h.state.openSurvey()
+  await h.state.openSurvey()
   assert.equal(h.state.surveyVisible.value, true)
+  assert.equal(h.state.surveyQuestions.value.length, 5)
 
   h.state.pickAnswer(1, 'A')
   h.state.pickAnswer(4, 'B')
@@ -184,6 +227,20 @@ test('上传页：先问卷、再同意，取消同意不丢答案', () => {
   assert.match(h.template, /@show-consent="openSurvey"/)
   assert.match(h.template, /<SurveySheet/)
   assert.match(h.template, /:answers="surveyAnswers"/)
+  assert.match(h.template, /:questions="surveyQuestions"/)
+})
+
+test('题目接口失败时不打开问卷，无法进行下一步', async () => {
+  const h = uploadHarness({
+    deps: {
+      '@/api/question': { fetchSurveyQuestions: async () => { throw new Error('network') } },
+    },
+  })
+  h.state.pendingFiles.value = [{ name: 'a.mp3', path: 'p1', size: 1024 }]
+  await h.state.openSurvey()
+  assert.equal(h.state.surveyVisible.value, false)
+  assert.equal(h.state.sheetVisible.value, false)
+  assert.equal(h.state.surveyQuestions.value.length, 0)
 })
 
 test('演示模式：绕过登录/额度，但仍不真的提交', () => {
