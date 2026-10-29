@@ -1,13 +1,13 @@
 <script setup lang="ts">
 /**
- * 用户协议正文（S19）：注册强制勾选的 4 份文件，公开访问，无需登录。
+ * 用户协议正文（S19）：冷启动授权页与注册页共用的协议清单，公开访问，无需登录。
+ * 数量由后台 `/configure/list` 决定，前端不写死。
  * 正文是 admin 后台富文本维护的 HTML，原样渲染。
  */
 import { onLoad } from '@dcloudio/uni-app'
 import { ref } from 'vue'
 import { fetchAgreementDetail } from '@/api/agreement'
 import type { AgreementDetail } from '@/api/agreement'
-import StatusBar from '@/components/StatusBar.vue'
 import { messageOf } from '@/utils/errors'
 
 const detail = ref<AgreementDetail | null>(null)
@@ -29,6 +29,8 @@ onLoad(async (query) => {
   }
   try {
     detail.value = await fetchAgreementDetail(key)
+    // 导航栏标题跟着具体协议走：5 份协议共用一个页面，标题不能永远是「用户协议」
+    uni.setNavigationBarTitle({ title: detail.value.title })
   }
   catch (error) {
     errorText.value = messageOf(error)
@@ -38,7 +40,6 @@ onLoad(async (query) => {
 
 <template>
   <view class="agreement-page">
-    <StatusBar />
     <view v-if="detail" class="agreement-body">
       <text class="agreement-kicker">谛听 · 用户协议</text>
       <text class="agreement-title">{{ detail.title }}</text>
@@ -57,7 +58,7 @@ onLoad(async (query) => {
   background: var(--bg);
 }
 .agreement-body {
-  padding: 12px 20px 48px;
+  padding: 18px 20px 48px;
 }
 .agreement-kicker {
   display: block;
@@ -88,7 +89,7 @@ onLoad(async (query) => {
   color: var(--ink);
 }
 .agreement-state {
-  padding: 80px 20px;
+  padding: 60px 20px;
   text-align: center;
   font-size: 14px;
   color: var(--ink-2);

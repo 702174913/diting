@@ -26,6 +26,9 @@ function pageHarness(page, options = {}) {
     '@dcloudio/uni-app': Object.fromEntries(['onLoad', 'onShow', 'onHide', 'onUnload'].map(name => [name, (cb) => { hooks[name] = cb }])),
     '@/stores/user': { useUserStore: () => store },
     '@/utils/h5Auth': { requireH5Login: () => true },
+    // 冷启动授权门禁：本文件测的是上传/记录流程，按「已同意」处理
+    '@/utils/consentGate': { hasFullAccess: () => true },
+    '@/utils/demo': { DEMO_MODE: false },
     '@/api/record': {
       fetchTaskStatus: async () => {
         requests++

@@ -45,9 +45,11 @@ diting:
   startup:
     schema-check:
       enabled: ${DITING_STARTUP_SCHEMA_CHECK:true}
+  # 微信小程序登录（code2session）凭据：只走环境变量，文件内不落真实值。
+  # 任一为空/占位（含「请替换」）时 /api/auth/wechat 一律 503，不会半配置状态下打真实接口。
   wechat:
-    appid: 请替换
-    secret: 请替换
+    appid: ${DITING_WECHAT_APPID:请替换}
+    secret: ${DITING_WECHAT_SECRET:请替换}
   # 媒体边界：真实支持范围由 POC 决定，未经真机验证前保持保守值
   media:
     allowed-formats: m4a,mp3,wav,amr,aac,flac

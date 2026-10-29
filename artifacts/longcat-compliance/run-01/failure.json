@@ -1,0 +1,5 @@
+{
+  "model": "opencode/longcat-2.5-preview-free",
+  "error": "OpenCode exited with code 1; inspect stderr.log; no fallback model invoked",
+  "elapsed_seconds": 2.13
+}

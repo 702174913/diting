@@ -73,8 +73,9 @@ async function loadAgreements() {
 }
 
 function toggleAgreement() {
-  if (!agreementsLoading.value && agreementList.value.length === 4
-    && Object.keys(seenVersions.value).length === 4) {
+  // 数量以接口下发的清单为准：后台增删协议后这里不该再写死 4
+  if (!agreementsLoading.value && agreementList.value.length > 0
+    && Object.keys(seenVersions.value).length === agreementList.value.length) {
     agreed.value = !agreed.value
   }
 }
@@ -106,8 +107,9 @@ async function submitWechat() {
   if (busy.value || !props.visible) {
     return
   }
-  if (!agreed.value || agreementList.value.length !== 4) {
-    errorText.value = '请先阅读并同意四份当前协议'
+  if (!agreed.value || agreementList.value.length === 0
+    || Object.keys(seenVersions.value).length !== agreementList.value.length) {
+    errorText.value = '请先阅读并同意当前全部协议'
     return
   }
   busy.value = true
@@ -230,7 +232,7 @@ async function submit() {
           </text>
         </view>
         <!-- #ifdef MP-WEIXIN -->
-        <button class="btn btn-main btn-block auth-submit" :disabled="busy || agreementsLoading || agreementList.length !== 4" @click="submitWechat">
+        <button class="btn btn-main btn-block auth-submit" :disabled="busy || agreementsLoading || agreementList.length === 0" @click="submitWechat">
           {{ busy ? '请稍候…' : '同意并用微信登录' }}
         </button>
         <!-- #endif -->

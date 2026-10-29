@@ -82,6 +82,11 @@ function openPrivacy() {
   uni.navigateTo({ url: '/pages/privacy/index' })
 }
 
+/** 重看三步介绍：引导只在首次自动弹，之后从这里手动进入 */
+function openGuide() {
+  uni.navigateTo({ url: '/pages/welcome/index' })
+}
+
 /** 在已有账号上绑定当前微信，不创建第二个账号；已被他人绑定由服务端 409 拒绝。 */
 async function bindCurrentWechat() {
   const token = userStore.token
@@ -136,6 +141,14 @@ onShow(() => {
     <view class="care">
       <text class="care-p">欠的钱要还<text class="care-br" /><text>说的话也要算数</text></text>
       <text class="care-fine">这是谛听的态度，也是它一千年前就定下的规矩。</text>
+    </view>
+
+    <view class="list">
+      <text class="list-t">怎么用</text>
+      <view class="li li-last li-link" role="button" tabindex="0" @click="openGuide">
+        <text class="li-k">→</text>
+        <text class="li-t">再看一遍三步介绍</text>
+      </view>
     </view>
 
     <view class="list">

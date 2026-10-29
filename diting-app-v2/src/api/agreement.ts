@@ -19,7 +19,7 @@ export interface AgreementDetail extends AgreementItem {
 }
 
 /** 配置项名称命中这些关键词即视为一份协议；业务参数（份数/阈值/时长）不含这些词 */
-const AGREEMENT_KEYWORD = /协议|授权书|授权协议|指引|隐私|许可/
+const AGREEMENT_KEYWORD = /协议|授权书|指引|隐私|许可|共享|清单/
 
 /** 接口不可用时的兜底正文；接口可用时一律使用接口下发的 value */
 const FALLBACK_CONTENT: Record<string, string> = {

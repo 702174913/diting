@@ -1,6 +1,13 @@
 {
   "pages": [
     {
+      "path": "pages/consent/index",
+      "style": {
+        "navigationBarTitleText": "授权与条款",
+        "navigationStyle": "custom"
+      }
+    },
+    {
       "path": "pages/home/index",
       "style": {
         "navigationBarTitleText": "谛听",
@@ -63,6 +70,14 @@
       "path": "pages/agreement/index",
       "style": {
         "navigationBarTitleText": "用户协议",
+        "navigationBarBackgroundColor": "#FBF6F0",
+        "navigationBarTextStyle": "black"
+      }
+    },
+    {
+      "path": "pages/welcome/index",
+      "style": {
+        "navigationBarTitleText": "怎么用谛听",
         "navigationStyle": "custom"
       }
     }

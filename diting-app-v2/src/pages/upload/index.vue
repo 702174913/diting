@@ -28,7 +28,12 @@ import { useUserStore } from '@/stores/user'
 import type { ChosenFile } from '@/utils/choose'
 import { MAX_IMAGES, chooseAudioFile, chooseImages, isImage, releaseChosenFile } from '@/utils/choose'
 import shieldSage from '@/static/icons/shield-sage.png'
+import SurveySheet from '@/components/SurveySheet.vue'
 import { requireH5Login } from '@/utils/h5Auth'
+import { DEMO_MODE } from '@/utils/demo'
+import { hasFullAccess } from '@/utils/consentGate'
+import type { SurveyPicks } from '@/utils/survey'
+import { toAnswerList } from '@/utils/survey'
 
 const userStore = useUserStore()
 
@@ -77,6 +82,47 @@ async function putWithRefresh(sign: UploadSign, filePath: string, token: string)
   }
 }
 
+/**
+ * 提交前的问卷：先问卷、再同意、最后才真正上传。
+ * 顺序有意为之——问卷不依赖登录与后端，登录态没就绪时也能先把这一步走完。
+ */
+const surveyVisible = ref(false)
+const surveyAnswers = ref<SurveyPicks>({})
+
+function openSurvey() {
+  if (pendingFiles.value.length === 0 || !ensureConsent()) {
+    return
+  }
+  surveyVisible.value = true
+}
+
+function pickAnswer(questionId: number, option: 'A' | 'B') {
+  surveyAnswers.value = { ...surveyAnswers.value, [questionId]: option }
+}
+
+/**
+ * 问卷提交后才进入同意弹层；取消同意不丢已选答案，回来还能看到。
+ *
+ * TODO(后端格式待定)：答案当前只留在页面状态里（surveyAnswers），
+ * 真正的提交位置在 confirmUpload；接口定下来后在这里或那里把它随任务一起带上。
+ */
+function submitSurvey() {
+  surveyVisible.value = false
+  sheetVisible.value = true
+}
+
+/**
+ * 冷启动授权门禁：没同意条款时，选文件与提交都先引导去授权页。
+ * 只拦「要动数据」的动作，浏览首页/记录不受影响——这是产品定的「允许浏览，功能受限」。
+ */
+function ensureConsent(): boolean {
+  if (hasFullAccess()) {
+    return true
+  }
+  uni.navigateTo({ url: '/pages/consent/index' })
+  return false
+}
+
 const audioSelected = computed(() => pendingFiles.value.find(file => !isImage(file)) ?? null)
 const imageSelected = computed(() => pendingFiles.value.filter(isImage))
 
@@ -111,16 +157,19 @@ function canChangeFiles() {
 
 /** 选录音：替换已选的那一段，已选图片照旧带上，两类可以一起交 */
 async function chooseFile() {
-  if (!canChangeFiles() || !requireH5Login(userStore.token, 'upload')) {
+  if (!canChangeFiles() || !ensureConsent() || (!DEMO_MODE && !requireH5Login(userStore.token, 'upload'))) {
     return
   }
   // #ifndef H5
-  const signed = await userStore.ensureLogin()
-  if (!signed) {
-    if (!userStore.consentRequired) {
-      uni.showToast({ title: '微信登录暂不可用，请稍后重试', icon: 'none' })
+  // 演示模式跳过微信登录：只为了能走到问卷与同意弹层，不会真的提交
+  if (!DEMO_MODE) {
+    const signed = await userStore.ensureLogin()
+    if (!signed) {
+      if (!userStore.consentRequired) {
+        uni.showToast({ title: '微信登录暂不可用，请稍后重试', icon: 'none' })
+      }
+      return
     }
-    return
   }
   // #endif
   // H5 文件选择器必须在点击事件的用户激活期内立即打开，不能先 await 网络预检。
@@ -155,16 +204,18 @@ async function chooseFile() {
 
 /** 选图片：最多 6 张，可多选；与已选图片合并（重复路径只留一份），已选录音照旧保留 */
 async function chooseImageFiles() {
-  if (!canChangeFiles() || !requireH5Login(userStore.token, 'upload')) {
+  if (!canChangeFiles() || !ensureConsent() || (!DEMO_MODE && !requireH5Login(userStore.token, 'upload'))) {
     return
   }
   // #ifndef H5
-  const signed = await userStore.ensureLogin()
-  if (!signed) {
-    if (!userStore.consentRequired) {
-      uni.showToast({ title: '微信登录暂不可用，请稍后重试', icon: 'none' })
+  if (!DEMO_MODE) {
+    const signed = await userStore.ensureLogin()
+    if (!signed) {
+      if (!userStore.consentRequired) {
+        uni.showToast({ title: '微信登录暂不可用，请稍后重试', icon: 'none' })
+      }
+      return
     }
-    return
   }
   // #endif
   const slots = MAX_IMAGES - imageSelected.value.length
@@ -200,6 +251,12 @@ async function chooseImageFiles() {
 
 /** 音频必须拿到服务端当前上限；图片沿用原额度预检的容错口径。 */
 async function precheckQuota(requireAudioLimit = false) {
+  if (DEMO_MODE) {
+    // 演示模式不问后端：给一个保守上限，让时长校验仍然生效
+    remaining.value = null
+    maxSeconds.value = 300
+    return true
+  }
   try {
     const quota = await fetchQuota(userStore.token)
     remaining.value = quota.remaining
@@ -271,6 +328,21 @@ async function confirmUpload() {
     attempt.value = null
     sheetVisible.value = false
     uni.switchTab({ url: '/pages/history/index' })
+    return
+  }
+  if (!ensureConsent()) {
+    sheetVisible.value = false
+    return
+  }
+  if (DEMO_MODE) {
+    // 演示模式不提交：问卷答案只打到控制台，避免造出一条「看起来成功」的假任务
+    sheetVisible.value = false
+    console.info('[demo] 问卷答案', toAnswerList(surveyAnswers.value))
+    uni.showToast({
+      title: `演示模式：已收集 ${toAnswerList(surveyAnswers.value).length}/5 题，未提交`,
+      icon: 'none',
+      duration: 2500,
+    })
     return
   }
   if (!requireH5Login(userStore.token, 'upload')) {
@@ -429,9 +501,17 @@ onUnmounted(() => {
       @choose-audio="chooseFile"
       @choose-images="chooseImageFiles"
       @remove-file="removeFile"
-      @show-consent="sheetVisible = true"
+      @show-consent="openSurvey"
       @confirm="confirmUpload"
       @cancel="sheetVisible = false"
+    />
+
+    <SurveySheet
+      :visible="surveyVisible"
+      :answers="surveyAnswers"
+      @pick="pickAnswer"
+      @submit="submitSurvey"
+      @cancel="surveyVisible = false"
     />
 
     <view class="tip">

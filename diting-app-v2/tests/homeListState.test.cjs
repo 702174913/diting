@@ -28,6 +28,9 @@ function harness(fetchTaskList) {
     '@/utils/format': { greeting: () => '早安' },
     '@/utils/taskStatus': { isRunning: () => false },
     '@/utils/h5Auth': { requireH5Login: token => Boolean(token) },
+    // 首页首次进入会先弹三步引导；本文件只测列表状态机，按「已看过」处理
+    '@/utils/onboard': { hasOnboarded: () => true },
+    '@/utils/consentGate': { hasFullAccess: () => true },
   }
   const exports = {}
   vm.runInNewContext(code, { exports, require: name => dependencies[name] || {}, uni: { switchTab() {}, navigateTo() {} } }, { filename: 'home/index.vue' })

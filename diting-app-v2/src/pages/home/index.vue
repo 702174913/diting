@@ -13,6 +13,8 @@ import { useUserStore } from '@/stores/user'
 import { greeting } from '@/utils/format'
 import type { TaskItem } from '@/types/api'
 import { requireH5Login } from '@/utils/h5Auth'
+import { hasOnboarded } from '@/utils/onboard'
+import { hasFullAccess } from '@/utils/consentGate'
 import markWarm from '@/static/icons/mark-warm.png'
 
 const userStore = useUserStore()
@@ -22,6 +24,12 @@ const loading = ref(false)
 const loadError = ref(false)
 let requestEpoch = 0
 const hello = greeting()
+/** 冷启动没同意条款时，首页保留浏览，但顶部提示「功能受限」 */
+const restricted = ref(!hasFullAccess())
+
+function openConsent() {
+  uni.navigateTo({ url: '/pages/consent/index' })
+}
 
 /** 首屏只露最近 4 段，其余去「记录」看 */
 const preview = computed(() => records.value.slice(0, 4))
@@ -70,7 +78,26 @@ function open(record: TaskItem) {
   uni.navigateTo({ url: `/pages/report/detail?id=${record.id}` })
 }
 
+/** 引导只在首次使用时弹一次；本次运行内即使首页反复 onShow 也不再进 */
+let onboardPrompted = false
+
+function promptOnboardingOnce(): boolean {
+  if (onboardPrompted || hasOnboarded()) {
+    return false
+  }
+  onboardPrompted = true
+  uni.navigateTo({ url: '/pages/welcome/index' })
+  return true
+}
+
 onShow(() => {
+  // 首次使用先把三步讲完，再谈登录与列表：引导页是覆盖整屏的，
+  // 这里直接返回，免得同一轮 onShow 里再 navigateTo 登录页，两个跳转互相顶掉。
+  // 从引导页返回时 onShow 会再触发一次，那时 onboardPrompted 已置位，正常加载。
+  if (promptOnboardingOnce()) {
+    return
+  }
+  restricted.value = !hasFullAccess()
   if (requireH5Login(userStore.token, 'home')) {
     void load()
   }
@@ -106,6 +133,11 @@ onShow(() => {
       tip-text="你的录音只用于这一次判读，作任何别的用途之前都会先问过你。"
       @action="goUpload"
     />
+
+    <view v-if="restricted" class="restricted" role="button" tabindex="0" @click="openConsent">
+      <text class="restricted-t">还没同意条款：可以随便看看，上传和删除要先同意</text>
+      <text class="restricted-go">去授权</text>
+    </view>
 
     <view class="sec">
       <text class="sec-h2">听过的话</text>
@@ -167,5 +199,31 @@ onShow(() => {
 */
 .empty {
   padding-bottom: 28px;
+}
+
+/* 受限提示：一条可点的横幅，不挡住首屏内容 */
+.restricted {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 20px 14px;
+  padding: 11px 14px;
+  background: var(--warm-soft);
+  border: 1px solid var(--warm-line);
+  border-radius: var(--r-md);
+}
+
+.restricted-t {
+  flex: 1;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #b05526;
+}
+
+.restricted-go {
+  flex: none;
+  font-size: 12.5px;
+  color: #b05526;
 }
 </style>
