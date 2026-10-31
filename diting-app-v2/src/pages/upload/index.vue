@@ -27,14 +27,13 @@ import { messageOf } from '@/utils/errors'
 import { newIdempotencyKey } from '@/utils/idempotency'
 import { useUserStore } from '@/stores/user'
 import type { ChosenFile } from '@/utils/choose'
-import { MAX_IMAGES, chooseAudioFile, chooseImages, isImage, releaseChosenFile } from '@/utils/choose'
+import { MAX_IMAGES, chooseAudioFile, chooseImages, isAudio, isImage, releaseChosenFile } from '@/utils/choose'
 import shieldSage from '@/static/icons/shield-sage.png'
 import SurveySheet from '@/components/SurveySheet.vue'
 import { requireH5Login } from '@/utils/h5Auth'
-import { DEMO_MODE } from '@/utils/demo'
 import { hasFullAccess } from '@/utils/consentGate'
 import type { SurveyPicks, SurveyQuestion } from '@/utils/survey'
-import { toAnswerList, toQuestionParams } from '@/utils/survey'
+import { toQuestionParams } from '@/utils/survey'
 import { useShareContent } from '@/utils/share'
 
 const userStore = useUserStore()
@@ -136,7 +135,7 @@ function ensureConsent(): boolean {
   return false
 }
 
-const audioSelected = computed(() => pendingFiles.value.find(file => !isImage(file)) ?? null)
+const audioSelected = computed(() => pendingFiles.value.find(isAudio) ?? null)
 const imageSelected = computed(() => pendingFiles.value.filter(isImage))
 
 /** 同意弹层上的一句话摘要：说清这次要交出去什么（可能录音、图片都有） */
@@ -170,19 +169,16 @@ function canChangeFiles() {
 
 /** 选录音：替换已选的那一段，已选图片照旧带上，两类可以一起交 */
 async function chooseFile() {
-  if (!canChangeFiles() || !ensureConsent() || (!DEMO_MODE && !requireH5Login(userStore.token, 'upload'))) {
+  if (!canChangeFiles() || !ensureConsent() || !requireH5Login(userStore.token, 'upload')) {
     return
   }
   // #ifndef H5
-  // 演示模式跳过微信登录：只为了能走到问卷与同意弹层，不会真的提交
-  if (!DEMO_MODE) {
-    const signed = await userStore.ensureLogin()
-    if (!signed) {
-      if (!userStore.consentRequired) {
-        uni.showToast({ title: '微信登录暂不可用，请稍后重试', icon: 'none' })
-      }
-      return
+  const signed = await userStore.ensureLogin()
+  if (!signed) {
+    if (!userStore.consentRequired) {
+      uni.showToast({ title: '微信登录暂不可用，请稍后重试', icon: 'none' })
     }
+    return
   }
   // #endif
   // H5 文件选择器必须在点击事件的用户激活期内立即打开，不能先 await 网络预检。
@@ -217,18 +213,16 @@ async function chooseFile() {
 
 /** 选图片：最多 6 张，可多选；与已选图片合并（重复路径只留一份），已选录音照旧保留 */
 async function chooseImageFiles() {
-  if (!canChangeFiles() || !ensureConsent() || (!DEMO_MODE && !requireH5Login(userStore.token, 'upload'))) {
+  if (!canChangeFiles() || !ensureConsent() || !requireH5Login(userStore.token, 'upload')) {
     return
   }
   // #ifndef H5
-  if (!DEMO_MODE) {
-    const signed = await userStore.ensureLogin()
-    if (!signed) {
-      if (!userStore.consentRequired) {
-        uni.showToast({ title: '微信登录暂不可用，请稍后重试', icon: 'none' })
-      }
-      return
+  const signed = await userStore.ensureLogin()
+  if (!signed) {
+    if (!userStore.consentRequired) {
+      uni.showToast({ title: '微信登录暂不可用，请稍后重试', icon: 'none' })
     }
+    return
   }
   // #endif
   const slots = MAX_IMAGES - imageSelected.value.length
@@ -264,12 +258,6 @@ async function chooseImageFiles() {
 
 /** 音频必须拿到服务端当前上限；图片沿用原额度预检的容错口径。 */
 async function precheckQuota(requireAudioLimit = false) {
-  if (DEMO_MODE) {
-    // 演示模式不问后端：给一个保守上限，让时长校验仍然生效
-    remaining.value = null
-    maxSeconds.value = 300
-    return true
-  }
   try {
     const quota = await fetchQuota(userStore.token)
     remaining.value = quota.remaining
@@ -293,27 +281,31 @@ async function precheckQuota(requireAudioLimit = false) {
   return true
 }
 
-/** 选完文件以及正式签发前各检查一次；未知时长一律拒绝，不上传 OSS。 */
+/**
+ * 选完文件以及正式签发前各检查一次。
+ * 本地能解析出时长就按上限拦；解析不出（格式伪装、损坏、iCloud 未下载）则不限制，
+ * 照常上传、交给服务端复核，避免个别机型把用户挡死在选择这一步。
+ */
 async function checkAudioLimit(file: ChosenFile) {
-  try {
-    const duration = file.durationMs ?? await readAudioDurationMs(file)
-    if (!Number.isFinite(duration) || duration <= 0) {
-      throw new Error('无法读取录音时长，请换一个受支持的录音文件后重试')
+  if (file.durationMs === undefined) {
+    try {
+      const duration = await readAudioDurationMs(file)
+      if (duration !== null && duration > 0) {
+        file.durationMs = duration
+      }
     }
-    file.durationMs = duration
-    if (maxSeconds.value === null) {
-      return false
+    catch {
+      // 本地解析失败不拦：服务端仍会校验
     }
-    if (duration > maxSeconds.value * 1000) {
-      uni.showToast({ title: `录音超过 ${maxSeconds.value} 秒上限，请换一段`, icon: 'none' })
-      return false
-    }
+  }
+  if (file.durationMs === undefined) {
     return true
   }
-  catch (error) {
-    uni.showToast({ title: error instanceof Error ? error.message : '无法读取录音时长，请换文件', icon: 'none' })
+  if (maxSeconds.value !== null && file.durationMs > maxSeconds.value * 1000) {
+    uni.showToast({ title: `录音超过 ${maxSeconds.value} 秒上限，请换一段`, icon: 'none' })
     return false
   }
+  return true
 }
 
 function removeFile(path: string) {
@@ -345,17 +337,6 @@ async function confirmUpload() {
   }
   if (!ensureConsent()) {
     sheetVisible.value = false
-    return
-  }
-  if (DEMO_MODE) {
-    // 演示模式不提交：问卷答案只打到控制台，避免造出一条「看起来成功」的假任务
-    sheetVisible.value = false
-    console.info('[demo] 问卷答案', toAnswerList(surveyAnswers.value, surveyQuestions.value))
-    uni.showToast({
-      title: `演示模式：已收集 ${toAnswerList(surveyAnswers.value, surveyQuestions.value).length}/${surveyQuestions.value.length} 题，未提交`,
-      icon: 'none',
-      duration: 2500,
-    })
     return
   }
   if (!requireH5Login(userStore.token, 'upload')) {
@@ -430,7 +411,7 @@ async function confirmUpload() {
         uploadStage.value = files.length > 1 ? `校验中 ${index}/${files.length}…` : '校验中…'
         const done = await completeUpload(entry.sign.uploadId, token)
         entry.verified = true
-        if (!isImage(file) && typeof done.durationMs === 'number' && done.durationMs > 0) {
+        if (isAudio(file) && typeof done.durationMs === 'number' && done.durationMs > 0) {
           currentAttempt.declaredDuration = Math.ceil(done.durationMs / 1000)
         }
       }

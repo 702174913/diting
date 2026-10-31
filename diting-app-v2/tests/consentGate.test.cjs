@@ -273,7 +273,6 @@ test('未同意时上传入口被拦到授权页，首页仍可浏览', () => {
   const upload = pageHarness('pages/upload/index.vue', {
     deps: {
       '@/utils/consentGate': gate,
-      '@/utils/demo': { DEMO_MODE: false },
       '@/utils/survey': loadUtil('utils/survey.ts'),
     },
   })
@@ -300,7 +299,6 @@ test('同意之后上传不再被门禁拦', async () => {
   const upload = pageHarness('pages/upload/index.vue', {
     deps: {
       '@/utils/consentGate': gate,
-      '@/utils/demo': { DEMO_MODE: false },
       '@/utils/survey': loadUtil('utils/survey.ts'),
     },
   })

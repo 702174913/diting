@@ -333,17 +333,24 @@ export interface ExportStatus {
   expiresAt: string | null
 }
 
-/** 后端只有一次性的 /pdf/export，这里虚拟一个立即完成的作业以复用页面流程 */
+/**
+ * 后端没有异步导出作业接口，只有一次性的 `/pdf/export`。
+ * 这里不再编造 exportId：直接用记录自身的 `audio_translation_id` 作为流程标识，
+ * 保证缓存键、状态回传和下载参数都是数据库里真实存在的 id。
+ */
 export function createExport(
-  _id: number,
+  id: number,
   _reportVersionId: number,
   _token: string,
   withAudio = false,
 ): Promise<{ exportId: number, status: string, fileType: string }> {
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    return Promise.reject(new ApiError(400, '记录 ID 无效，无法导出'))
+  }
   if (withAudio) {
     return Promise.reject(new ApiError(501, '当前仅支持导出 PDF 报告'))
   }
-  return Promise.resolve({ exportId: 1, status: 'COMPLETED', fileType: withAudio ? 'zip' : 'pdf' })
+  return Promise.resolve({ exportId: id, status: 'COMPLETED', fileType: 'pdf' })
 }
 
 export function fetchExport(exportId: number, _token: string): Promise<ExportStatus> {
@@ -489,7 +496,8 @@ export async function fetchExportDownload(
   token: string,
   audioTranslationId?: number,
 ): Promise<{ exportId: number, fileType: string, downloadUrl: string, expiresAt: string | null }> {
-  const url = exportPdfUrl(token, audioTranslationId)
+  // exportId 现在就是记录 id；显式传入的 audioTranslationId 优先，兼容旧调用。
+  const url = exportPdfUrl(token, audioTranslationId ?? exportId)
   if (typeof document !== 'undefined' && typeof fetch === 'function') {
     const res = await fetch(url, { credentials: 'omit' })
     if (res.headers.get('content-type')?.includes('json')) {

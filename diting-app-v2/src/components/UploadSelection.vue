@@ -67,7 +67,7 @@ const promises = [
         </button>
       </view>
       <text v-if="busy && uploadPercent !== null" class="muted up-caption">已上传 {{ uploadPercent }}%</text>
-      <text v-else class="muted up-caption">仅支持 MP3 音频、JPG/PNG 图片，单个文件不超过 10MB；录音最多一段，图片最多 {{ MAX_IMAGES }} 张</text>
+      <text v-else class="muted up-caption">仅支持 MP3/M4A 音频、JPG/PNG 图片，单个文件不超过 10MB；录音最多一段，图片最多 {{ MAX_IMAGES }} 张</text>
 
       <view v-if="pendingFiles.length" class="picked">
         <view v-for="file in pendingFiles" :key="file.path" class="picked-row">

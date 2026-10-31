@@ -2,7 +2,7 @@
 import { configureMap } from './configure'
 import { ApiError, BASE_URL, unwrapEnvelope } from './request'
 import { addAudioTranslation } from './tingwu'
-import { AUDIO_EXTENSIONS, IMAGE_EXTENSIONS, MAX_IMAGES, MAX_UPLOAD_BYTES } from '@/utils/choose'
+import { AUDIO_EXTENSIONS, IMAGE_EXTENSIONS, MAX_IMAGES, MAX_UPLOAD_BYTES, hasExtension } from '@/utils/choose'
 import type { QuotaSnapshot } from '@/types/api'
 
 export interface UploadSign {
@@ -116,7 +116,7 @@ export interface QuestionSubmission {
   question_answer_id: number
 }
 
-/** 同次提交允许最多一段 MP3 与最多六张图片（可混合）；返回后端给出的新记录 ID（拿不到时为 null）。 */
+/** 同次提交允许最多一段 MP3/M4A 与最多六张图片（可混合）；返回后端给出的新记录 ID（拿不到时为 null）。 */
 export async function submitTask(
   uploadIds: number[],
   declaredDurationSec: number | undefined,
@@ -134,11 +134,11 @@ export async function submitTask(
     }
     return file
   })
-  const audio = files.filter(file => /\.mp3$/i.test(file.originalName))
-  const pictures = files.filter(file => /\.(jpg|png)$/i.test(file.originalName))
+  const audio = files.filter(file => hasExtension(file.originalName, AUDIO_EXTENSIONS))
+  const pictures = files.filter(file => hasExtension(file.originalName, IMAGE_EXTENSIONS))
   if (audio.length + pictures.length !== files.length
     || audio.length > 1 || pictures.length > MAX_IMAGES) {
-    throw new ApiError(422, '请提交最多一段 MP3 音频和最多六张 JPG/PNG 图片')
+    throw new ApiError(422, `请提交最多一段 MP3/M4A 音频和最多 ${MAX_IMAGES} 张 JPG/PNG 图片`)
   }
   // 不选的类别传空串；文件名只作展示，上传返回名必须原样交给后端。
   const id = await addAudioTranslation({
@@ -147,7 +147,8 @@ export async function submitTask(
     audio_name: audio[0]?.originalName ?? '',
     audio: audio[0]?.fileName ?? '',
     audio_duration: audio.length && Number.isFinite(declaredDurationSec)
-      ? Math.max(0, Math.ceil(declaredDurationSec!)) : 0,
+      ? Math.max(0, Math.ceil(declaredDurationSec!))
+      : 0,
     questions: JSON.stringify(questions),
   }, token)
   uploadIds.forEach((uploadId) => {
@@ -247,7 +248,10 @@ async function uploadViaBrowser(
   form.append('file', await source.blob(), sign.objectKey)
   // 不手写 Content-Type，由浏览器生成 multipart boundary。
   const response = await fetch(sign.uploadUrl, {
-    method: 'POST', credentials: 'omit', headers: sign.headers, body: form,
+    method: 'POST',
+    credentials: 'omit',
+    headers: sign.headers,
+    body: form,
   })
   acceptUploadResponse(sign, await response.text(), response.status)
   onProgress?.(100)

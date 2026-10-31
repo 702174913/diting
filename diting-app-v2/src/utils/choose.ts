@@ -1,5 +1,8 @@
-/** 上传接口仅接受 MP3 音频 */
-export const AUDIO_EXTENSIONS = ['mp3']
+/** 上传接口接受 MP3 / M4A 音频（小程序端也只放行这两种后缀） */
+export const AUDIO_EXTENSIONS = ['mp3', 'm4a']
+
+/** 上传接口只接受 JPG / PNG，不接受 JPEG、WEBP 等其他后缀 */
+export const IMAGE_EXTENSIONS = ['jpg', 'png']
 
 /** 单文件不超过 10MB；每个文件单独发起一次上传请求 */
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024
@@ -8,6 +11,8 @@ export interface ChosenFile {
   path: string
   name: string
   size: number
+  /** H5 选择时保留的 File，用来按偏移读文件头；小程序只有临时路径 */
+  blob?: Blob
   /** 本地解析得到的录音时长；图片不需要 */
   durationMs?: number
 }
@@ -17,9 +22,20 @@ export interface ChosenFile {
  * 两类文件都走同一提交会话，由后端分类处理。
  */
 
+/** 后缀判定统一走这一份实现，选择、页面分类、签发、提交共用，避免各处正则漂移。 */
+export function hasExtension(name: string, extensions: string[]): boolean {
+  const extension = name.split('.').pop()?.toLowerCase() ?? ''
+  return extensions.includes(extension)
+}
+
 /** 选择后统一判定图片，页面逻辑与选择列表使用同一格式口径。 */
 export function isImage(file: Pick<ChosenFile, 'name'>): boolean {
-  return /\.(?:jpg|jpeg|png|webp|bmp|gif|tiff|tif)$/i.test(file.name)
+  return hasExtension(file.name, IMAGE_EXTENSIONS)
+}
+
+/** 录音后缀口径只在这里定义一次；选择、签发、提交三处共用，避免各处正则漂移。 */
+export function isAudio(file: Pick<ChosenFile, 'name'>): boolean {
+  return hasExtension(file.name, AUDIO_EXTENSIONS)
 }
 
 interface ChooseResult {
@@ -79,12 +95,12 @@ export function chooseAudioFile(): Promise<ChosenFile> {
     return chooseBrowserFiles(AUDIO_EXTENSIONS.map(ext => `.${ext}`).join(','), false).then(([file]) => {
       const extension = file.name.split('.').pop()?.toLowerCase() ?? ''
       if (!AUDIO_EXTENSIONS.includes(extension)) {
-        throw new Error('录音仅支持 MP3 格式，请先转换')
+        throw new Error('录音仅支持 MP3 / M4A 格式，请先转换')
       }
       if (!file.size || file.size > MAX_UPLOAD_BYTES) {
         throw new Error(`录音为空或超过 ${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)}MB，请重新选择`)
       }
-      return { path: URL.createObjectURL(file), name: file.name, size: file.size }
+      return { path: URL.createObjectURL(file), name: file.name, size: file.size, blob: file }
     })
   }
   // #endif
@@ -113,8 +129,8 @@ export function chooseAudioFile(): Promise<ChosenFile> {
           return
         }
         const name = file.name || path.split('/').pop() || 'recording'
-        if (!/\.mp3$/i.test(name)) {
-          reject(new Error('录音仅支持 MP3 格式，请先转换'))
+        if (!isAudio({ name })) {
+          reject(new Error('录音仅支持 MP3 / M4A 格式，请先转换'))
           return
         }
         resolve({ path, name, size })
@@ -133,9 +149,6 @@ export function chooseAudioFile(): Promise<ChosenFile> {
     reject(new Error('当前平台不支持选择文件'))
   })
 }
-
-/** 上传接口只接受 JPG / PNG，不接受 JPEG、WEBP 等其他后缀 */
-export const IMAGE_EXTENSIONS = ['jpg', 'png']
 
 /** 单张图片上限：官方文档写「二进制不超过 10MB」 */
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024

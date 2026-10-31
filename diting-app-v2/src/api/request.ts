@@ -47,8 +47,9 @@ export interface RequestOptions {
   form?: boolean
 }
 
-/** 接口基址：默认打到本地后端，可用 VITE_BASE_URL 覆盖 */
-export const BASE_URL = import.meta.env.VITE_BASE_URL || 'http://localhost:8081'
+/** 接口基址：默认打到本地后端，可用 VITE_BASE_URL 覆盖；去掉结尾斜杠，避免拼出 `//path` */
+const RAW_BASE_URL = import.meta.env.VITE_BASE_URL || 'http://localhost:8081'
+export const BASE_URL = RAW_BASE_URL.replace(/\/+$/, '')
 
 let unauthorizedHandler: (() => void) | null = null
 

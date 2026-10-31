@@ -57,13 +57,13 @@ function uploadHarness(options = {}) {
     '@/stores/user': { useUserStore: () => ({ token: '', userInfo: null, consentRequired: false, ensureLogin: async () => true }) },
     '@/utils/choose': {
       MAX_IMAGES: 6,
-      isImage: file => /\.(png|jpg)$/i.test(file.name),
+      isImage: file => /\.(?:png|jpg)$/i.test(file.name),
+      isAudio: file => /\.(?:mp3|m4a)$/i.test(file.name),
       chooseAudioFile: async () => null,
       chooseImages: async () => [],
       releaseChosenFile() {},
     },
     '@/utils/h5Auth': { requireH5Login: () => true },
-    '@/utils/demo': { DEMO_MODE: false },
     '@/utils/consentGate': { hasFullAccess: () => true },
     '@/utils/share': { useShareContent: () => () => ({}) },
     '@/utils/survey': survey,
@@ -241,19 +241,4 @@ test('题目接口失败时不打开问卷，无法进行下一步', async () =>
   assert.equal(h.state.surveyVisible.value, false)
   assert.equal(h.state.sheetVisible.value, false)
   assert.equal(h.state.surveyQuestions.value.length, 0)
-})
-
-test('演示模式：绕过登录/额度，但仍不真的提交', () => {
-  const h = uploadHarness()
-  // 非演示模式下源码里必须有 DEMO_MODE 开关，且提交前短路
-  assert.match(h.source, /DEMO_MODE/)
-  assert.match(h.source, /\[demo\] 问卷答案/)
-  const demoBlock = h.source.indexOf('if (DEMO_MODE)')
-  const loginGate = h.source.indexOf('if (!requireH5Login(userStore.token, \'upload\'))', demoBlock)
-  assert.ok(demoBlock > 0 && loginGate > demoBlock, '演示分支必须在登录门禁之前短路')
-  // 开关本身必须同时受 DEV 与环境变量约束：生产包里不可能被打开
-  const demo = fs.readFileSync(path.join(SRC, 'utils/demo.ts'), 'utf8')
-  assert.match(demo, /import\.meta\.env\.DEV/)
-  assert.match(demo, /VITE_DEMO_MODE === 'true'/)
-  assert.match(h.source, /precheckQuota/)
 })

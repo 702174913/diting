@@ -440,9 +440,16 @@ test('PDF 只传 token、不携带 cookie；当前返回的是真 PDF 才生成�
     URL: { createObjectURL: () => 'blob:pdf' },
   } })
   const result = await c.load('@/api/record').fetchExportDownload(1, c.token)
-  assert.equal(requested[0], 'http://localhost:8081/pdf/export?token=test-token')
+  assert.equal(requested[0], 'http://localhost:8081/pdf/export?token=test-token&audio_translation_id=1')
   assert.equal(requested[1].credentials, 'omit')
   assert.equal(result.downloadUrl, 'blob:pdf')
+})
+
+test('导出标识使用记录自身的 audio_translation_id，不再返回写死的 1', async () => {
+  const c = client()
+  const job = await c.load('@/api/record').createExport(37, 5, c.token)
+  assert.equal(job.exportId, 37)
+  assert.equal(job.status, 'COMPLETED')
 })
 
 test('PDF 导出带上 audio_translation_id，token 仍在 URL 上', async () => {

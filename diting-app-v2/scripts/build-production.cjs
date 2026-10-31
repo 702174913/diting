@@ -9,7 +9,8 @@ const platform = process.argv[2]
 if (!['h5', 'mp-weixin'].includes(platform)) {
   throw new Error('仅支持显式 h5 / mp-weixin 生产构建')
 }
-const env = loadEnv('production', root, 'VITE_')
+// DITING_* 只从本地未入库的 env 文件兜底读取；process.env 显式设置时优先（CI/命令行导出仍可用）。
+const env = loadEnv('production', root, ['VITE_', 'DITING_'])
 const base = (process.env.VITE_BASE_URL || env.VITE_BASE_URL || '').trim()
 let url
 try {
@@ -34,8 +35,8 @@ try {
 catch {
   throw new Error('生产构建缺少有效的 src/manifest.json')
 }
-const wechatAppId = (process.env.DITING_WECHAT_APPID || '').trim()
-const uniAppId = (process.env.DITING_UNI_APP_ID || '').trim()
+const wechatAppId = (process.env.DITING_WECHAT_APPID ?? env.DITING_WECHAT_APPID ?? '').trim()
+const uniAppId = (process.env.DITING_UNI_APP_ID ?? env.DITING_UNI_APP_ID ?? '').trim()
 if (platform === 'mp-weixin' && !/^wx[a-f0-9]{16}$/i.test(wechatAppId)) {
   throw new Error('微信小程序生产构建必须设置真实的 DITING_WECHAT_APPID（wx + 16位十六进制）')
 }

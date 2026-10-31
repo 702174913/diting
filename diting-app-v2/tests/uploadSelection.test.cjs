@@ -56,6 +56,6 @@ test('文件类型判断在选择逻辑与子组件间共用', () => {
   const exports = {}
   const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText
   vm.runInNewContext(code, { exports }, { filename: 'choose.ts' })
-  assert.equal(exports.isImage({ name: 'photo.WEBP' }), true)
+  assert.equal(exports.isImage({ name: 'photo.WEBP' }), false)
   assert.equal(exports.isImage({ name: 'call.m4a' }), false)
 })

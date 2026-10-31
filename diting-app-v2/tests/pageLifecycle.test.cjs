@@ -29,7 +29,6 @@ function pageHarness(page, options = {}) {
     // 冷启动授权门禁：本文件测的是上传/记录流程，按「已同意」处理
     '@/utils/consentGate': { hasFullAccess: () => true },
     '@/utils/share': { useShareContent: () => () => ({}) },
-    '@/utils/demo': { DEMO_MODE: false },
     '@/api/record': {
       fetchTaskStatus: async () => {
         requests++
@@ -46,6 +45,7 @@ function pageHarness(page, options = {}) {
     '@/utils/choose': {
       MAX_IMAGES: 6,
       isImage: file => /\.(?:png|jpg)$/i.test(file.name),
+      isAudio: file => /\.(?:mp3|m4a)$/i.test(file.name),
       releaseChosenFile() {},
       ...options.chooseApi,
     },
@@ -310,22 +310,31 @@ test('配置改变后正式签发前再次拦截超长录音，不发签名也�
   assert.match(h.toasts.at(-1).title, /超过 60 秒/)
 })
 
-test('时长无法读取或上限接口不可用时拒绝上传，不伪装为合格录音', async () => {
+test('本地读不出时长时不拦人（交给服务端），上限接口不可用仍拦截', async () => {
   let signs = 0
+  const submissions = []
   const h = pageHarness('upload', {
-    readAudioDurationMs: async () => { throw new Error('无法读取录音时长，请换文件') },
+    readAudioDurationMs: async () => null,
     uploadApi: {
       fetchQuota: async () => ({ remaining: 1, maxRecordingSeconds: 600 }),
       signUpload: async () => {
         signs++
         return { uploadId: 1 }
       },
+      uploadRaw: async () => {},
+      completeUpload: async () => ({ durationMs: null }),
+      submitTask: async (_ids, duration) => {
+        submissions.push(duration)
+        return 88
+      },
     },
   })
   h.state.pendingFiles.value = [{ name: 'bad.amr', path: 'memory/bad', size: 123 }]
   await h.state.confirmUpload()
-  assert.equal(signs, 0)
-  assert.match(h.toasts.at(-1).title, /无法读取录音时长/)
+  assert.equal(signs, 1)
+  assert.deepEqual(submissions, [undefined])
+
+  const signedBeforeOffline = signs
 
   h.state.pendingFiles.value = [{ name: 'call.mp3', path: 'memory/call', size: 123, durationMs: 30_000 }]
   h.state.maxSeconds.value = null
@@ -340,7 +349,7 @@ test('时长无法读取或上限接口不可用时拒绝上传，不伪装为�
   })
   offline.state.pendingFiles.value = h.state.pendingFiles.value
   await offline.state.confirmUpload()
-  assert.equal(signs, 0)
+  assert.equal(signs, signedBeforeOffline)
   assert.match(offline.toasts.at(-1).title, /无法获取录音时长上限/)
 })
 
